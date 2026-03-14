@@ -32,7 +32,12 @@ class EntreriosScraper(BaseScraper):
             "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-ciencias-de-la-historia-escuela-secundaria-n4-anselmo-sean-valiente/",
             "https://cge.entrerios.gov.ar/2026/03/convocatoria-escuela-secundaria-n-1-david-della-chiesa-ceibas/",
             "https://cge.entrerios.gov.ar/2026/03/llamado-a-concurso-llamado-a-concurso-instituto-superior-de-formacion-docente-continua-villa-paranacito-islas/",
-            "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-lengua-y-literatura-escuela-secundaria-n-5-jose-gervasio-artigas-arroyo-martinez/"
+            "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-lengua-y-literatura-escuela-secundaria-n-5-jose-gervasio-artigas-arroyo-martinez/",
+            # Nuevas URLs del usuario
+            "https://cge.entrerios.gov.ar/2026/03/convocatoria-escuela-secundaria-n-3-francisco-ramirez-ibicuy-3/",
+            "https://cge.entrerios.gov.ar/2026/03/convocatoria-e-e-t-n-96-conscripto-giorgi-ibicuy-3/",
+            "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-por-proyecto-escuela-secundaria-n-2-islas-del-ibicuy-villa-paranacito/",
+            "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-instalaciones-electromecanicas-e-e-t-n-1-augusto-widmann-villa-paranacito/"
         ]
         
         print("🧠 Inicializando sistema de aprendizaje con URLs conocidas...")
@@ -236,13 +241,40 @@ class EntreriosScraper(BaseScraper):
         # URLs específicas del usuario para crear concursos manuales
         user_specific_contests = [
             {
-                "title": "Convocatoria Escuela Secundaria N°3 Francisco Ramírez",
-                "url": "https://cge.entrerios.gov.ar/2026/03/convocatoria-escuela-secundaria-n-3-francisco-ramirez/",
+                "title": "Convocatoria Escuela Secundaria N°3 Francisco Ramírez - Ibicuy 3",
+                "url": "https://cge.entrerios.gov.ar/2026/03/convocatoria-escuela-secundaria-n-3-francisco-ramirez-ibicuy-3/",
                 "school": "Escuela Secundaria N°3 Francisco Ramírez",
-                "city": "Por verificar",
-                "department": "Por verificar",
+                "city": "Ibicuy",
+                "department": "Ibicuy",
                 "subject": "Convocatoria General",
-                "description": "Convocatoria para la Escuela Secundaria N°3 Francisco Ramírez."
+                "description": "Convocatoria para la Escuela Secundaria N°3 Francisco Ramírez de Ibicuy 3."
+            },
+            {
+                "title": "Convocatoria E.E.T.N N°96 Conscripto Giorgi - Ibicuy 3",
+                "url": "https://cge.entrerios.gov.ar/2026/03/convocatoria-e-e-t-n-96-conscripto-giorgi-ibicuy-3/",
+                "school": "E.E.T.N N°96 Conscripto Giorgi",
+                "city": "Ibicuy",
+                "department": "Ibicuy",
+                "subject": "Convocatoria General",
+                "description": "Convocatoria para la E.E.T.N N°96 Conscripto Giorgi de Ibicuy 3."
+            },
+            {
+                "title": "Convocatoria Horas por Proyecto - Escuela Secundaria N°2 Islas del Ibicuy - Villa Paranacito",
+                "url": "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-por-proyecto-escuela-secundaria-n-2-islas-del-ibicuy-villa-paranacito/",
+                "school": "Escuela Secundaria N°2 Islas del Ibicuy",
+                "city": "Villa Paranacito",
+                "department": "Islas",
+                "subject": "Horas por Proyecto",
+                "description": "Convocatoria para cubrir horas por proyecto en la Escuela Secundaria N°2 Islas del Ibicuy de Villa Paranacito."
+            },
+            {
+                "title": "Convocatoria Horas Instalaciones Electromecánicas - E.E.T.N N°1 Augusto Widmann - Villa Paranacito",
+                "url": "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-instalaciones-electromecanicas-e-e-t-n-1-augusto-widmann-villa-paranacito/",
+                "school": "E.E.T.N N°1 Augusto Widmann",
+                "city": "Villa Paranacito",
+                "department": "Islas",
+                "subject": "Instalaciones Electromecánicas",
+                "description": "Convocatoria para cubrir horas de Instalaciones Electromecánicas en la E.E.T.N N°1 Augusto Widmann de Villa Paranacito."
             },
             {
                 "title": "Convocatoria Horas Ciencias de la Historia - Escuela Secundaria N°4 Anselmo Sean Valiente",
