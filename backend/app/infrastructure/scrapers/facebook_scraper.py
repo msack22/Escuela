@@ -58,6 +58,10 @@ class FacebookScraper(BaseScraper):
         self.pattern_learning.patterns_data['last_updated'] = datetime.now().isoformat()
         self.pattern_learning._save_patterns()
         
+        # Agregar la URL específica del usuario al aprendizaje
+        specific_url = "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-instalaciones-electromecanicas-e-e-t-n-1-augusto-widmann-villa-paranacito/"
+        self.pattern_learning.learn_from_url("Facebook Pages - Entre Ríos", specific_url, "Convocatoria Horas Instalaciones Electromecánicas")
+        
         stats = self.pattern_learning.get_statistics()
         print(f"📘 Patrones de Facebook inicializados: {stats['total_patterns']} patrones")
     
