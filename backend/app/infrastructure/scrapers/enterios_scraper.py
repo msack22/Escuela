@@ -366,63 +366,171 @@ class EntreriosScraper(BaseScraper):
             links = soup.find_all('a', href=True)
             for link in links:
                 href = link.get('href', '')
-                text = link.get_text().lower()
+    
+    for link in links:
+        href = link.get('href', '')
+        link_text = link.get_text().strip()
+        
+        # Verificar si el enlace apunta a concursos
+        if self._is_contest_link(href, link_text):
+            full_url = urljoin(self.base_url, href)
+            if full_url not in contest_links:
+                contest_links.append(full_url)
+                print(f"🔗 Enlace de concurso encontrado: {full_url}")
                 
-                # Si el enlace contiene palabras clave de concurso
-                if any(keyword in text for keyword in ['concurso', 'convocatoria', 'llamado', 'cargo', 'puesto', 'cátedra']):
-                    if href.startswith('/'):
-                        full_url = urljoin(self.base_url, href)
-                    elif href.startswith('http'):
-                        full_url = href
-                    else:
-                        continue
-                    
-                    # Crear un concurso básico desde el enlace
-                    contest = self._create_contest_from_link(link, full_url)
-                    if contest:
-                        contests.append(contest)
-        
-        return contests
+                # Crear concurso desde el enlace
+                contest = self._create_contest_from_link(link, full_url)
+                if contest:
+                    contests.append(contest)
+                    print(f"✅ Concurso creado desde enlace: {contest.title}")
     
-    def _create_contest_from_link(self, link_element, url: str) -> Optional[ScrapedContest]:
-        """Crear un concurso desde un enlace que contiene palabras clave"""
-        try:
-            text = self.normalize_text(link_element.get_text())
-            
-            # Extraer información básica del texto
-            school_info = self._extract_school_info(text, url)
-            subject = self._extract_subject(text)
-            level = self._extract_level(text)
-            
-            return ScrapedContest(
-                title=text,
-                description=f"Concurso encontrado en enlace. URL: {url}\n\nTexto original: {text}",
-                date=datetime.now(),
-                registration_deadline=None,
-                school_name=school_info['name'],
-                school_city=school_info['city'],
-                school_department=school_info['department'],
-                school_address=school_info['address'],
-                subject_name=subject,
-                source_url=url,
-                source_name=self.name,
-                level=level,
-                shift=None,
-                schedule=None,
-                hours_to_cover=None,
-                contract_type=None
-            )
-            
-        except Exception as e:
-            print(f"Error creating contest from link: {e}")
+    # 📊 ESTADÍSTICAS DE LA PÁGINA
+    print(f"📊 Estadísticas de {url}:")
+    print(f"   - Elementos analizados: {len(found_elements)}")
+    print(f"   - Enlaces encontrados: {len(links)}")
+    print(f"   - Enlaces de concursos: {len(contest_links)}")
+    print(f"   - Concursos extraídos: {len(contests)}")
+    print(f"   - Patrones aprendidos usados: {len(learned_patterns)}")
+    
+    return contests
+
+def _create_contest_from_pattern(self, match: Dict, url: str, soup: BeautifulSoup) -> Optional[ScrapedContest]:
+    """Crear un concurso basado en un patrón aprendido"""
+    try:
+        pattern = match['pattern']
+        
+        # Extraer título de la página
+        title = self._get_page_title(soup)
+        
+        # Crear título basado en el patrón
+        if pattern['type'] == 'convocatoria_escuela':
+            contest_title = f"Convocatoria Escuela - {title}"
+        elif pattern['type'] == 'convocatoria_horas':
+            contest_title = f"Convocatoria Horas - {title}"
+        elif pattern['type'] == 'llamado_concurso':
+            contest_title = f"Llamado a Concurso - {title}"
+        elif pattern['type'] == 'concurso_cargo':
+            contest_title = f"Concurso Cargo - {title}"
+        else:
+            contest_title = f"Concurso {pattern['type']} - {title}"
+        
+        return ScrapedContest(
+            title=contest_title,
+            description=f"Concurso detectado automáticamente usando patrón de aprendizaje: {pattern['type']}\n\nURL: {url}\nConfianza del patrón: {match['confidence']:.2f}",
+            date=datetime.now(),
+            registration_deadline=None,
+            school_name=self._extract_school_from_url(url),
+            school_city=self._extract_city_from_url(url),
+            school_department=self._extract_department_from_url(url),
+            school_address=None,
+            subject_name=pattern['type'],
+            source_url=url,
+            source_name=self.name,
+            publication_link=url,
+            level="Todos"
+        )
+    except Exception as e:
+        print(f"Error creando contesto desde patrón: {e}")
+        return None
+
+def _contains_contest_keywords(self, text: str) -> bool:
+    """Verificar si el texto contiene palabras clave de concursos"""
+    contest_keywords = [
+        "concurso", "convocatoria", "llamado", "edicto", "nombramiento", "designación",
+        "cátedra", "cargo", "horas", "materia", "asignatura", "suplencia", "interinidad",
+        "selección", "postulación", "inscripción", "preinscripción", "presentación"
+    ]
+    
+    text_lower = text.lower()
+    return any(keyword in text_lower for keyword in contest_keywords)
+
+def _is_contest_link(self, href: str, text: str) -> bool:
+    """Verificar si un enlace apunta a un concurso"""
+    contest_indicators = [
+        "concurso", "convocatoria", "llamado", "edicto", "nombramiento", "designación",
+        "catedra", "cargo", "horas", "materia", "asignatura", "suplencia"
+    ]
+    
+    href_lower = href.lower()
+    text_lower = text.lower()
+    
+    return any(indicator in href_lower or indicator in text_lower for indicator in contest_indicators)
+
+def _create_contest_from_element(self, element, url: str) -> Optional[ScrapedContest]:
+    """Crear un concurso desde un elemento HTML"""
+    try:
+        title = element.get_text().strip()
+        if not title or len(title) < 10:
             return None
-    
-    def _find_all_relevant_links(self, soup: BeautifulSoup, base_url: str, visited_urls: set) -> List[str]:
-        """Encontrar TODOS los enlaces relevantes que puedan contener concursos"""
-        links = []
         
-        # Si no hay soup, crear una solicitud básica a la página principal
-        if soup is None:
+        return ScrapedContest(
+            title=title[:200],  # Limitar título
+            description=f"Concurso encontrado automáticamente en la página.\n\nElemento: {title[:500]}...\n\nURL: {url}",
+            date=datetime.now(),
+            registration_deadline=None,
+            school_name=self._extract_school_from_url(url),
+            school_city=self._extract_city_from_url(url),
+            school_department=self._extract_department_from_url(url),
+            school_address=None,
+            subject_name="Concurso Detectado",
+            source_url=url,
+            source_name=self.name,
+            publication_link=url,
+            level="Todos"
+        )
+    except Exception as e:
+        print(f"Error creando contesto desde elemento: {e}")
+        return None
+
+def _extract_school_from_url(self, url: str) -> str:
+    """Extraer nombre de escuela desde URL"""
+    try:
+        if "escuela" in url.lower():
+            parts = url.split('/')
+            for part in parts:
+                if "escuela" in part.lower():
+                    return part.replace('-', ' ').title()
+        return "Consejo General de Educación"
+    except:
+        return "Consejo General de Educación"
+
+def _extract_city_from_url(self, url: str) -> str:
+    """Extraer ciudad desde URL"""
+    cities = ["paraná", "concepción del uruguay", "gualeguaychú", "concordia", "colón", "villaguay"]
+    url_lower = url.lower()
+    for city in cities:
+        if city.lower() in url_lower:
+            return city.title()
+    return "Entre Ríos"
+
+def _extract_department_from_url(self, url: str) -> str:
+    """Extraer departamento desde URL"""
+    return "Entre Ríos"
+
+def _find_all_relevant_links(self, soup: BeautifulSoup, base_url: str, visited_urls: set) -> List[str]:
+    """Encontrar TODOS los enlaces relevantes que puedan contener concursos"""
+    links = []
+    
+    # Si no hay soup, crear una solicitud básica a la página principal
+    if soup is None:
+        # Agregar URLs base conocidas que suelen tener concursos
+        base_urls = [
+            "https://cge.entrerios.gov.ar/concursos/",
+            "https://cge.entrerios.gov.ar/noticias/",
+            "https://cge.entrerios.gov.ar/jurado-de-concursos-noticias/",
+            "https://cge.entrerios.gov.ar/2026/03/",
+            "https://cge.entrerios.gov.ar/2026/02/",
+            "https://cge.entrerios.gov.ar/2026/01/",
+            # Departamentales - Fuentes Ricas de Concursos
+            "https://cge.entrerios.gov.ar/departamental-diamante/",
+            "https://cge.entrerios.gov.ar/departamental-concordia/",
+            "https://cge.entrerios.gov.ar/departamental-parana/",
+            "https://cge.entrerios.gov.ar/departamental-gualeguaychu/",
+            "https://cge.entrerios.gov.ar/departamental-uruguay/",
+            "https://cge.entrerios.gov.ar/departamental-villaguay/",
+            "https://cge.entrerios.gov.ar/departamental-colón/",
+            "https://cge.entrerios.gov.ar/departamental-federal/",
+            "https://cge.entrerios.gov.ar/departamental-concepción-del-uruguay/",
             # Agregar URLs base conocidas que suelen tener concursos
             base_urls = [
                 "https://cge.entrerios.gov.ar/concursos/",
