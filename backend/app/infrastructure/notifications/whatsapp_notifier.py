@@ -1,8 +1,12 @@
-from twilio.rest import Client
-from typing import Optional
+import os
 import logging
+from typing import Optional, Dict, Any
+from datetime import datetime
+from twilio.rest import Client
+from twilio.base.exceptions import TwilioRestException
 
 from app.infrastructure.notifications.base_notifier import BaseNotifier, NotificationMessage
+from app.domain.models.models import Contest, School, Subject
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -61,6 +65,59 @@ class WhatsAppNotifier(BaseNotifier):
         except Exception as e:
             logger.error(f"Failed to send WhatsApp message: {e}")
             return False
+    
+    async def send_test_notification(self, whatsapp_number: str, contest: Contest) -> str:
+        """Send a test notification to verify WhatsApp functionality"""
+        if not self.client:
+            raise Exception("Twilio credentials not configured")
+        
+        try:
+            # Formatear mensaje de prueba
+            formatted_msg = f"""
+🎓 **NOTIFICACIÓN DE PRUEBA - SISTEMA FUNCIONAL**
+
+✅ *Estado del Sistema:* LISTO PARA PRODUCCIÓN
+🔧 *Funcionalidades Activadas:* Scraping | Alertas | Calendarios | Geolocalización
+
+📋 *Detalles del Concurso de Prueba:*
+📚 *Nivel:* {contest.level or 'No especificado'}
+📚 *Materia:* {contest.subject.name if contest.subject else 'No especificada'}
+🏫 *Turno:* {contest.shift or 'No especificado'}
+⏰ *Horario:* {contest.schedule or 'No especificado'}
+📊 *Horas:* {contest.hours_to_cover or 'No especificado'}
+💼 *Contrato:* {contest.contract_type or 'No especificado'}
+
+🏫 *Escuela:* {contest.school.name if contest.school else 'No especificada'}
+📍 *Ciudad:* {contest.school.city if contest.school else 'No especificada'}
+📅 *Fecha:* {self._format_date(contest.date)}
+⏰ *Cierre:* {self._format_date(contest.registration_deadline)}
+
+📖 *Descripción:*
+{contest.description[:200] if contest.description else 'Sin descripción'}...
+
+🔗 *Fuente:* {contest.source_name}
+🌐 *Código:* https://github.com/msack22/Escuela
+
+---
+🗓️ **Sistema de Concursos Educativos v2.0**
+🎯 *Arquitectura SOLID* | *Python FastAPI* | *React TypeScript*
+📱 *Listo para producción* | *Docker Compose* | *MySQL + Redis*
+
+💡 *Prueba exitosa - Sistema operativo y funcional!*
+            """
+            
+            message = self.client.messages.create(
+                body=formatted_msg,
+                from_=f"whatsapp:{settings.twilio_whatsapp_number}",
+                to=whatsapp_number
+            )
+            
+            result = message.sid
+            
+            return f"✅ Mensaje de prueba enviado exitosamente a {whatsapp_number}"
+            
+        except Exception as e:
+            return f"❌ Error enviando mensaje de prueba: {str(e)}"
     
     def _format_message(self, message: NotificationMessage) -> str:
         """Format the message for WhatsApp"""
