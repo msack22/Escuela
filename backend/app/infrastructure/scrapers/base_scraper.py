@@ -19,6 +19,7 @@ class ScrapedContest:
     subject_name: str
     source_url: str
     source_name: str
+    publication_link: Optional[str] = None  # Link de la publicación original
     
     # Additional contest details
     level: Optional[str] = None          # primaria, secundaria, inicial, etc.

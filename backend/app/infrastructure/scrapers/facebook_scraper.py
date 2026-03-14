@@ -637,89 +637,58 @@ class FacebookScraper(BaseScraper):
                     'ddegualeguaychu': 'Gualeguaychú',
                     'ddeconcordia': 'Concordia',
                     'ddevillaguay': 'Villaguay',
-                    'ddecolon': 'Colón',
-                    'ddefeliciano': 'Feliciano',
-                    'ddevictoria': 'Victoria',
-                    'ddegualeguay': 'Gualeguay',
-                    'ddepaysandu': 'Paysandú',
-                    'ddechajarí': 'Chajarí',
-                    'ddelapaz': 'La Paz',
-                    'ddehasenkamp': 'Hasenkamp',
-                    'ddeherrera': 'Herrera',
-                    'ddenogoya': 'Nogoyá',
-                    'ddemaria': 'María',
-                    'ddetala': 'Rosario del Tala',
-                    'ddecrespo': 'Crespo',
-                    'ddesaladas': 'Saladas',
-                    'ddefederación': 'Federación',
-                    'ddesanmarcos': 'San Marcos',
-                    'ddesanjose': 'San José',
-                    'ddesantaelena': 'Santa Elena',
-                    'ddesauce': 'Sauce',
-                    'ddesur': 'Departamento Sur',
-                    'ddecentro': 'Departamento Centro',
-                    'ddenorte': 'Departamento Norte',
-                    'ddeoeste': 'Departamento Oeste'
                 }
                 
-                school_name = f"Dirección de Educación de {dde_name.title()}"
-                school_city = dde_cities.get(dde_name.lower(), dde_name.title())
-                school_department = dde_cities.get(dde_name.lower(), dde_name.title())
-            
-            # Detectar si es CGE (Consejo General de Educación)
-            elif "cge" in url.lower():
-                title = "Concursos CGE Entre Ríos - Facebook"
-                description = f"Concursos y convocatorias publicados por el Consejo General de Educación de Entre Ríos.\n\nURL: {url}\n\nNota: Esta es la página oficial del CGE donde se publican todos los concursos provinciales."
-                school_name = "Consejo General de Educación de Entre Ríos"
-                school_city = "Paraná"
-                school_department = "Paraná"
-            
-            # Detectar si es Educación Provincial
-            elif "educacionentrerios" in url.lower():
-                title = "Concursos Educación Provincial - Facebook"
-                description = f"Concursos y convocatorias publicados por el Ministerio de Educación de Entre Ríos.\n\nURL: {url}\n\nNota: Esta es la página oficial del Ministerio de Educación provincial."
-                school_name = "Ministerio de Educación de Entre Ríos"
-                school_city = "Paraná"
-                school_department = "Paraná"
-            
-            # Detectar si es AMET
-            elif "amet" in url.lower():
-                title = "Concursos AMET - Facebook"
-                description = f"Concursos y convocatorias publicados por AMET (Asociación Magisterial de Entre Ríos).\n\nURL: {url}\n\nNota: AMET publica información relevante para docentes de la provincia."
-                school_name = "AMET - Asociación Magisterial de Entre Ríos"
-                school_city = "Paraná"
-                school_department = "Paraná"
-            
-            else:
-                # Crear un concurso básico con la información que tenemos
-                title = f"Concurso de Facebook - {url_parts[-2] if len(url_parts) > 2 else 'Post'}"
-                description = f"Concurso encontrado en Facebook. URL: {url}\n\nNota: Este concurso requiere revisión manual ya que Facebook no permite acceso automatizado. Por favor visite la URL original para obtener información completa."
-                school_name = "Por verificar en Facebook"
-                school_city = "Entre Ríos"
-                school_department = "Varios"
-            
-            return ScrapedContest(
-                title=title,
-                description=description,
-                date=datetime.now(),
-                registration_deadline=None,
-                school_name=school_name,
-                school_city=school_city,
-                school_department=school_department,
-                school_address=None,
-                subject_name="General",
-                source_url=url,
-                source_name=self.name,
-                level="Secundaria",
-                shift=None,
-                schedule=None,
-                hours_to_cover=None,
-                contract_type=None
-            )
-            
+                return ScrapedContest(
+                    title=title,
+                    description=description,
+                    date=datetime.now(),
+                    registration_deadline=None,
+                    school_name=school_name,
+                    school_city=school_city,
+                    school_department=school_department,
+                    subject=self._extract_subject_from_title(title),
+                    level="Todos",
+                    source_url=url,
+                    publication_link=self._extract_publication_link(url),
+                    source_name=self.name
+                )
+                
         except Exception as e:
-            print(f"Error creating manual contest from URL {url}: {e}")
+            print(f"Error creando concurso manual desde URL {url}: {e}")
             return None
+    
+    def _extract_publication_link(self, facebook_url: str) -> str:
+        """Extraer el link de la publicación original si existe"""
+        try:
+            # Para posts de Facebook share, el link de publicación es el mismo
+            if "share/p/" in facebook_url:
+                return facebook_url
+            elif "posts/" in facebook_url:
+                # Es un post directo, extraer el ID
+                post_id = facebook_url.split("posts/")[1].split("/")[0]
+                return f"https://www.facebook.com/posts/{post_id}"
+            elif "permalink.php" in facebook_url:
+                # Es un permalink
+                return facebook_url
+            else:
+                # Para otros casos, devolver el URL original
+                return facebook_url
+        except Exception:
+            return facebook_url
+    
+    def _extract_dde_name_from_url(self, url: str) -> str:
+        """Extraer nombre del DDE desde URL"""
+        try:
+            if "dde" in url.lower():
+                # Buscar el nombre del DDE después de 'dde'
+                parts = url.split("/")
+                for i, part in enumerate(parts):
+                    if "dde" in part.lower() and i + 1 < len(parts):
+                        return parts[i + 1].replace("-", " ").title()
+            return "General"
+        except Exception:
+            return "General"
     
     async def is_available(self) -> bool:
         """Check if the scraper source is available"""

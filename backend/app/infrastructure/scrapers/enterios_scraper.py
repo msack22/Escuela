@@ -147,7 +147,7 @@ class EntreriosScraper(BaseScraper):
         except Exception as e:
             print(f"❌ Error general en scraping {self.name}: {e}")
         
-        # Si no se encontraron concursos, crear concursos manuales
+        # Si no se encontraron concursos o el sitio está caído, crear concursos manuales
         if not contests:
             print("📝 No se encontraron concursos, creando concursos manuales para URLs conocidas...")
             manual_contests = self._create_manual_cge_contests()
