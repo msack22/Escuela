@@ -45,116 +45,118 @@ class EntreriosScraper(BaseScraper):
             self.pattern_learning.learn_from_url(url)
         
         stats = self.pattern_learning.get_statistics()
-        print(f"📊 Sistema de aprendizaje inicializado: {stats['total_patterns']} patrones aprendidos")
+        print(f" Sistema de aprendizaje inicializado: {stats['total_patterns']} patrones aprendidos")
     
     async def scrape_contests(self, limit: Optional[int] = None) -> List[ScrapedContest]:
-        """Scrape contests from Consejo General de Educación - versión con caché"""
+        """Scrape contests from Consejo General de Educación - versión con caché y aprendizaje"""
         contests = []
         
         try:
-            print("🔍 Iniciando scraping con sistema de caché...")
+            print(" Iniciando scraping CGE con sistema de aprendizaje...")
             
-            # Mostrar estadísticas del caché
-            stats = self.url_cache.get_exploration_stats(self.name)
-            print(f"📊 Estadísticas del caché: {stats['total_urls_explored']} URLs exploradas, {stats['total_contests_found']} concursos encontrados")
+            # Siempre crear concursos manuales para garantizar que las URLs específicas estén disponibles
+            print(" Creando concursos manuales para URLs específicas del usuario...")
+            manual_contests = self._create_manual_cge_contests()
+            contests.extend(manual_contests)
+            print(f" Se crearon {len(manual_contests)} concursos manuales específicos")
             
-            # Headers para simular navegador real
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'es-AR,es;q=0.9,en;q=0.8',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1'
-            }
-            
-            # Timeout extendido a 10 minutos para explorar más a fondo
-            timeout = aiohttp.ClientTimeout(total=600, connect=30)  # 10 minutos total, 30 segundos de conexión
-            
-            async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-                try:
+            # Intentar scraping adicional para encontrar más concursos
+            try:
+                print(" Intentando scraping adicional del sitio CGE...")
+                
+                # Headers para evitar bloqueos
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'es-AR,es;q=0.9,en;q=0.8',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1'
+                }
+                
+                timeout = aiohttp.ClientTimeout(total=600, connect=30)  # 10 minutos total, 30 segundos conexión
+                async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+                    print(f" Explorando sitio principal: {self.base_url}")
+                    
                     async with session.get(self.base_url) as response:
                         if response.status == 200:
-                            print("✅ Sitio del CGE accesible, obteniendo enlaces...")
+                            print(" Sitio del CGE accesible, obteniendo enlaces...")
                             html = await response.text()
                             soup = BeautifulSoup(html, 'html.parser')
                             
                             # Obtener todos los enlaces relevantes
                             all_relevant_links = self._find_all_relevant_links(soup, self.base_url, set())
-                            print(f"🔗 Encontrados {len(all_relevant_links)} enlaces relevantes totales")
+                            print(f" Encontrados {len(all_relevant_links)} enlaces relevantes totales")
                             
                             # Buscar URLs similares basadas en patrones del usuario
                             similar_urls = self._search_similar_urls(soup, self.base_url)
-                            print(f"🔍 Encontradas {len(similar_urls)} URLs similares por patrones")
+                            print(f" Encontradas {len(similar_urls)} URLs similares por patrones")
                             
                             # Combinar enlaces relevantes y similares
                             all_links = list(set(all_relevant_links + similar_urls))
-                            print(f"📊 Total de enlaces a explorar: {len(all_links)}")
+                            print(f" Total de enlaces a explorar: {len(all_links)}")
                             
                             # Filtrar solo URLs no exploradas recientemente (últimos 7 días)
                             unexplored_links = self.url_cache.get_unexplored_urls(self.name, all_links, max_age_days=7)
-                            print(f"🆕 URLs no exploradas recientemente: {len(unexplored_links)}")
+                            print(f" URLs no exploradas recientemente: {len(unexplored_links)}")
                             
-                            if not unexplored_links:
-                                print("ℹ️ Todas las URLs ya fueron exploradas recientemente. Creando concursos manuales...")
-                                manual_contests = self._create_manual_cge_contests()
-                                contests.extend(manual_contests)
-                                print(f"📝 Se crearon {len(manual_contests)} concursos manuales")
-                                return contests
-                            
-                            # Explorar solo URLs nuevas (limitar a 15 para no exceder tiempo)
-                            links_to_explore = unexplored_links[:15]
-                            print(f"🎯 Explorando {len(links_to_explore)} URLs nuevas...")
-                            
-                            for i, link in enumerate(links_to_explore):
-                                if limit and len(contests) >= limit:
-                                    break
+                            if unexplored_links:
+                                # Limitar a 15 URLs para no exceder tiempo
+                                urls_to_explore = unexplored_links[:15]
+                                print(f" Explorando {len(urls_to_explore)} URLs seleccionadas...")
                                 
-                                print(f"🔍 Explorando {i+1}/{len(links_to_explore)}: {link}")
-                                
-                                try:
-                                    async with session.get(link, timeout=60) as response:  # 60 segundos por enlace
-                                        if response.status == 200:
-                                            html = await response.text()
-                                            soup = BeautifulSoup(html, 'html.parser')
-                                            
-                                            page_contests = self._extract_contests_from_page(soup, link)
-                                            contests.extend(page_contests)
-                                            
-                                            # Marcar URL como explorada
-                                            self.url_cache.mark_url_explored(self.name, link, len(page_contests))
-                                            
-                                            print(f"✅ Encontrados {len(page_contests)} concursos en {link}")
-                                            print(f"📊 Total acumulado: {len(contests)} concursos")
-                                            
-                                except Exception as e:
-                                    print(f"❌ Error explorando {link}: {e}")
-                                    # Marcar como explorada aunque haya error para no reintentar pronto
-                                    self.url_cache.mark_url_explored(self.name, link, 0)
-                                    continue
-                            
-                            # Limpiar caché de entradas antiguas
-                            self.url_cache.cleanup_old_entries(max_age_days=30)
+                                for i, url in enumerate(urls_to_explore):
+                                    try:
+                                        print(f" Explorando {i+1}/{len(urls_to_explore)}: {url}")
+                                        
+                                        async with session.get(url, timeout=60) as response:
+                                            if response.status == 200:
+                                                page_html = await response.text()
+                                                page_soup = BeautifulSoup(page_html, 'html.parser')
+                                                
+                                                # Extraer concursos de esta página
+                                                page_contests = self._extract_contests_from_page(page_soup, url)
+                                                contests.extend(page_contests)
+                                                
+                                                # Marcar URL como explorada
+                                                self.url_cache.mark_explored(self.name, url, len(page_contests))
+                                                
+                                                print(f" {len(page_contests)} concursos encontrados en {url}")
+                                                
+                                                # Aprender de esta página
+                                                self.pattern_learning.learn_from_url(url, self._get_page_title(page_soup))
+                                                
+                                            else:
+                                                print(f" Error {response.status} en {url}")
+                                                self.url_cache.mark_explored(self.name, url, 0)
+                                                
+                                    except Exception as e:
+                                        print(f" Error explorando {url}: {e}")
+                                        self.url_cache.mark_explored(self.name, url, 0)
+                            else:
+                                print(" Todas las URLs ya fueron exploradas recientemente")
                             
                         else:
-                            print(f"❌ Sitio del CGE no accesible - Status: {response.status}")
+                            print(f" Sitio del CGE no accesible - Status: {response.status}")
                             
-                except asyncio.TimeoutError:
-                    print("⏰ Timeout al acceder al sitio del CGE")
-                except Exception as e:
-                    print(f"❌ Error accediendo al sitio del CGE: {e}")
+            except asyncio.TimeoutError:
+                print(" Timeout en scraping adicional, pero concursos manuales ya creados")
+            except Exception as e:
+                print(f" Error en scraping adicional: {e}")
         
         except Exception as e:
-            print(f"❌ Error general en scraping {self.name}: {e}")
+            print(f" Error general en scraping {self.name}: {e}")
         
-        # Si no se encontraron concursos o el sitio está caído, crear concursos manuales
+        # Siempre devolver los concursos manuales como mínimo
         if not contests:
-            print("📝 No se encontraron concursos, creando concursos manuales para URLs conocidas...")
+            print(" Creando concursos manuales como fallback...")
             manual_contests = self._create_manual_cge_contests()
             contests.extend(manual_contests)
-            print(f"📝 Se crearon {len(manual_contests)} concursos manuales")
         
-        print(f"🎉 Exploración completada. Total concursos encontrados: {len(contests)}")
+        print(f" Scraping CGE completado. Total concursos: {len(contests)}")
+        print(f" Concursos manuales específicos: {len(manual_contests)}")
+        print(f" Concursos adicionales encontrados: {len(contests) - len(manual_contests)}")
+        
         return contests
     
     def _generate_search_patterns_from_urls(self) -> List[Dict]:
@@ -314,7 +316,7 @@ class EntreriosScraper(BaseScraper):
             }
         ]
         
-        for contest_info in known_contests:
+        for contest_info in user_specific_contests:
             try:
                 contest = ScrapedContest(
                     title=contest_info["title"],
@@ -328,11 +330,8 @@ class EntreriosScraper(BaseScraper):
                     subject_name=contest_info["subject"],
                     source_url=contest_info["url"],
                     source_name=self.name,
-                    level="Secundaria" if "Secundaria" in contest_info["school"] else "Primaria",
-                    shift=None,
-                    schedule=None,
-                    hours_to_cover=None,
-                    contract_type=None
+                    publication_link=contest_info["url"],
+                    level="Todos"
                 )
                 contests.append(contest)
                 print(f"Concurso manual creado: {contest_info['title']}")
