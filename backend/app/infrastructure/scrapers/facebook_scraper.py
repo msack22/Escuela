@@ -1,6 +1,6 @@
 import aiohttp
 import asyncio
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 import re
 from urllib.parse import urljoin, urlparse
@@ -60,7 +60,7 @@ class FacebookScraper(BaseScraper):
         
         # Agregar la URL específica del usuario al aprendizaje
         specific_url = "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-instalaciones-electromecanicas-e-e-t-n-1-augusto-widmann-villa-paranacito/"
-        self.pattern_learning.learn_from_url("Facebook Pages - Entre Ríos", specific_url, "Convocatoria Horas Instalaciones Electromecánicas")
+        self.pattern_learning.learn_from_url(specific_url, "Convocatoria Horas Instalaciones Electromecánicas")
         
         stats = self.pattern_learning.get_statistics()
         print(f"📘 Patrones de Facebook inicializados: {stats['total_patterns']} patrones")

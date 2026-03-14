@@ -1,7 +1,7 @@
 import aiohttp
 import asyncio
 from bs4 import BeautifulSoup
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 import re
 from urllib.parse import urljoin

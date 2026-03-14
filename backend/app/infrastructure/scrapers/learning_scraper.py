@@ -2,7 +2,7 @@
 Scraper base con sistema de aprendizaje universal integrado
 """
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 import aiohttp
 import asyncio

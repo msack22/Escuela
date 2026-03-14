@@ -4,7 +4,7 @@ Sistema de aprendizaje automático de patrones de URLs
 import json
 import re
 from datetime import datetime
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Any
 from pathlib import Path
 
 
