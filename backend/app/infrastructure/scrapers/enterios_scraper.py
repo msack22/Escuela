@@ -74,7 +74,7 @@ class EntreriosScraper(BaseScraper):
                     'Upgrade-Insecure-Requests': '1'
                 }
                 
-                timeout = aiohttp.ClientTimeout(total=600, connect=30)  # 10 minutos total, 30 segundos conexión
+                timeout = aiohttp.ClientTimeout(total=1800, connect=60)  # 30 minutos total, 60 segundos conexión
                 async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
                     print(f" Explorando sitio principal: {self.base_url}")
                     
@@ -100,16 +100,18 @@ class EntreriosScraper(BaseScraper):
                             unexplored_links = self.url_cache.get_unexplored_urls(self.name, all_links, max_age_days=7)
                             print(f" URLs no exploradas recientemente: {len(unexplored_links)}")
                             
+                            # 🚀 BÚSQUEDA MASIVA - AUMENTAR LÍMITES PARA 1000+ CONCURSOS
                             if unexplored_links:
-                                # Limitar a 15 URLs para no exceder tiempo
-                                urls_to_explore = unexplored_links[:15]
-                                print(f" Explorando {len(urls_to_explore)} URLs seleccionadas...")
+                                # EXPANDIR LÍMITES MASIVAMENTE
+                                urls_to_explore = unexplored_links[:100]  # Aumentar de 15 a 100 URLs
+                                print(f"🚀 EXPLORACIÓN MASIVA: {len(urls_to_explore)} URLs seleccionadas de {len(unexplored_links)} disponibles")
+                                print(f"🎯 OBJETIVO: Encontrar 1000+ concursos en toda Entre Ríos")
                                 
                                 for i, url in enumerate(urls_to_explore):
                                     try:
-                                        print(f" Explorando {i+1}/{len(urls_to_explore)}: {url}")
+                                        print(f"🔍 [{i+1}/{len(urls_to_explore)}] Explorando: {url}")
                                         
-                                        async with session.get(url, timeout=60) as response:
+                                        async with session.get(url, timeout=90) as response:  # Aumentar timeout a 90s
                                             if response.status == 200:
                                                 page_html = await response.text()
                                                 page_soup = BeautifulSoup(page_html, 'html.parser')
@@ -121,20 +123,25 @@ class EntreriosScraper(BaseScraper):
                                                 # Marcar URL como explorada
                                                 self.url_cache.mark_explored(self.name, url, len(page_contests))
                                                 
-                                                print(f" {len(page_contests)} concursos encontrados en {url}")
+                                                print(f"✅ {len(page_contests)} concursos encontrados en {url}")
+                                                print(f"📊 Total acumulado: {len(contests)} concursos")
                                                 
                                                 # Aprender de esta página
                                                 self.pattern_learning.learn_from_url(url, self._get_page_title(page_soup))
                                                 
+                                                # Si ya encontramos muchos concursos, seguir explorando
+                                                if len(contests) >= 500:
+                                                    print(f"🎯 OBJETIVO INTERMEDIO ALCANZADO: {len(contests)} concursos encontrados")
+                                                
                                             else:
-                                                print(f" Error {response.status} en {url}")
+                                                print(f"❌ Error {response.status} en {url}")
                                                 self.url_cache.mark_explored(self.name, url, 0)
                                                 
                                     except Exception as e:
-                                        print(f" Error explorando {url}: {e}")
+                                        print(f"❌ Error explorando {url}: {e}")
                                         self.url_cache.mark_explored(self.name, url, 0)
                             else:
-                                print(" Todas las URLs ya fueron exploradas recientemente")
+                                print("ℹ️ Todas las URLs ya fueron exploradas recientemente")
                             
                         else:
                             print(f" Sitio del CGE no accesible - Status: {response.status}")
@@ -418,24 +425,40 @@ class EntreriosScraper(BaseScraper):
         if soup is None:
             # Agregar URLs base conocidas que suelen tener concursos
             base_urls = [
-                "https://cge.entrerios.gov.ar/noticias/",
-                "https://cge.entrerios.gov.ar/novedades/",
-                "https://cge.entrerios.gov.ar/comunicados/",
-                "https://cge.entrerios.gov.ar/avisos/",
-                "https://cge.entrerios.gov.ar/edictos/",
-                "https://cge.entrerios.gov.ar/resoluciones/",
-                "https://cge.entrerios.gov.ar/2026/",
-                "https://cge.entrerios.gov.ar/2025/",
-                "https://cge.entrerios.gov.ar/2024/",
-                "https://cge.entrerios.gov.ar/marzo/",
-                "https://cge.entrerios.gov.ar/abril/",
-                "https://cge.entrerios.gov.ar/mayo/",
                 "https://cge.entrerios.gov.ar/concursos/",
-                "https://cge.entrerios.gov.ar/convocatorias/",
-                "https://cge.entrerios.gov.ar/llamados/",
-                "https://cge.entrerios.gov.ar/cargos/",
-                "https://cge.entrerios.gov.ar/selecciones/",
-                base_url  # Agregar la página principal también
+                "https://cge.entrerios.gov.ar/noticias/",
+                "https://cge.entrerios.gov.ar/jurado-de-concursos-noticias/",
+                "https://cge.entrerios.gov.ar/2026/03/",
+                "https://cge.entrerios.gov.ar/2026/02/",
+                "https://cge.entrerios.gov.ar/2026/01/",
+                # Departamentales - Fuentes Ricas de Concursos
+                "https://cge.entrerios.gov.ar/departamental-diamante/",
+                "https://cge.entrerios.gov.ar/departamental-concordia/",
+                "https://cge.entrerios.gov.ar/departamental-parana/",
+                "https://cge.entrerios.gov.ar/departamental-gualeguaychu/",
+                "https://cge.entrerios.gov.ar/departamental-uruguay/",
+                "https://cge.entrerios.gov.ar/departamental-villaguay/",
+                "https://cge.entrerios.gov.ar/departamental-colón/",
+                "https://cge.entrerios.gov.ar/departamental-federal/",
+                "https://cge.entrerios.gov.ar/departamental-concepción-del-uruguay/",
+                # Niveles educativos
+                "https://cge.entrerios.gov.ar/primaria/",
+                "https://cge.entrerios.gov.ar/secundaria/",
+                "https://cge.entrerios.gov.ar/inicial/",
+                "https://cge.entrerios.gov.ar/especial/",
+                "https://cge.entrerios.gov.ar/superior/",
+                "https://cge.entrerios.gov.ar/tecnico-profesional/",
+                "https://cge.entrerios.gov.ar/adultos/",
+                "https://cge.entrerios.gov.ar/privada/",
+                # Recursos humanos y gestión
+                "https://cge.entrerios.gov.ar/recursos-humanos/",
+                "https://cge.entrerios.gov.ar/direccion-de-ajustes-y-liquidaciones/",
+                "https://cge.entrerios.gov.ar/direccion-de-educacion-fisica/",
+                "https://cge.entrerios.gov.ar/planeamiento/",
+                # Eventos y actividades
+                "https://cge.entrerios.gov.ar/jornadasregionales2026/",
+                # Página principal para encontrar más enlaces
+                "https://cge.entrerios.gov.ar/"
             ]
             
             for url in base_urls:
@@ -445,16 +468,52 @@ class EntreriosScraper(BaseScraper):
             
             return links
         
-        # Palabras clave expandidas para concursos
+        # 🎯 PALABRAS CLAVE EXPANDIDAS PARA DETECCIÓN MASIVA
         contest_keywords = [
-            'concurso', 'convocatoria', 'llamado', 'selección', 'cargo', 'puesto', 'nombramiento',
-            'cátedra', 'interino', 'suplente', 'titular', 'provisorio', 'transitorio',
-            'docente', 'profesor', 'maestro', 'director', 'vicerrector', 'secretario',
-            'educación', 'escuela', 'instituto', 'colegio', 'primaria', 'secundaria', 'inicial',
-            'preescolar', 'jardín', 'especial', 'técnico', 'artística', 'adultos',
-            'edicto', 'resolución', 'disposición', 'acto', 'designación', 'asignación',
-            'oferta', 'vacante', 'cupo', 'plaza', 'posición', 'empleo', 'trabajo',
-            'oportunidad', 'profesional', 'magisterial', 'docente', 'educativo'
+            # Términos principales de concursos
+            "concurso", "convocatoria", "llamado", "edicto", "nombramiento", "designación", "selección",
+            # Tipos específicos
+            "cátedra", "cargo", "cargo docente", "horas", "materia", "asignatura", "suplencia", "interinidad",
+            # Niveles educativos
+            "inicial", "primario", "primaria", "secundario", "secundaria", "superior", "terciario", "universitario",
+            # Modalidades
+            "presencial", "virtual", "remoto", "a distancia", "semipresencial", "mixto",
+            # Áreas y materias expandidas
+            "matemática", "lengua", "ciencias", "historia", "geografía", "biología", "física", "química", "informática",
+            "educación física", "plástica", "música", "filosofía", "psicología", "sociología", "economía", "contabilidad",
+            "inglés", "francés", "italiano", "portugués", "aleman", "chino", "japonés",
+            # Especialidades técnicas
+            "electromecánica", "electrónica", "mecánica", "construcciones", "informática", "telecomunicaciones",
+            "agropecuaria", "industrial", "comercial", "administración", "secretariado", "contabilidad",
+            # Cargos directivos
+            "director", "vicedirector", "secretario", "prosecretario", "regente", "jefe", "coordinador",
+            # Personal de apoyo
+            "preceptor", "auxiliar", "bibliotecario", "laboratorista", "portero", "ordenanza", "administrativo",
+            # Programas especiales
+            "programa", "proyecto", "plan", "inclusión", "integración", "apoyo", "refuerzo", "tutoría",
+            # Términos legales y administrativos
+            "resolución", "disposición", "decreto", "ley", "ordenanza", "reglamento", "estatuto",
+            # Localidades de Entre Ríos (para búsqueda geográfica)
+            "paraná", "concepción del uruguay", "gualeguaychú", "concordia", "colón", "villaguay", "uruguay",
+            "diamante", "federal", "gualeguay", "nogoyá", "san josé", "feliciano", "victoria", "la paz",
+            "saladas", "crespo", "tala", "hasenkamp", "herrera", "maría", "san pedro", "villaguay",
+            "ibicuy", "paranacito", "ceibas", "libertador san martín", "sauce", "san salvador",
+            "mocoretá", "arroyo verde", "basavilbaso", "el granero", "galarza", "general álvaro",
+            "hernandarias", "hernández", "jubileo", "lacroze", "lucas norte", "lucas sur",
+            "maciá", "maría grande", "mendoza", "nueva york", "paysandú", "pueblo brugo",
+            "pueblo gómez", "pueblo urquiza", "racedo", "ramírez", "rosario del tala", "san benito",
+            "san genaro", "san josé de feliciano", "san marcos", "san pedro", "santa elena",
+            "sauce", "tabossi", "viale", "villaguay", "villa del rosario", "villa fontana",
+            "villa guaymallén", "villa mancera", "villa Paranacito", "villa urquiza",
+            # Instituciones educativas
+            "escuela", "colegio", "instituto", "liceo", "establecimiento", "centro educativo",
+            "escuela técnica", "escuela de comercio", "escuela agropecuaria", "escuela normal",
+            # Documentos y procesos
+            "inscripción", "preinscripción", "postulación", "presentación", "expediente", "legajo",
+            "antecedentes", "títulos", "certificados", "diplomas", "habilitaciones",
+            # Períodos y fechas
+            "2026", "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+            "septiembre", "octubre", "noviembre", "diciembre", "ciclo lectivo", "año escolar"
         ]
         
         # Secciones importantes expandidas del sitio
