@@ -17,7 +17,13 @@ import {
 } from '@mui/icons-material';
 import { useQuery } from 'react-query';
 
-import { fetchContestStatistics, fetchSystemStatus } from '../../services/api';
+import {
+  fetchContests,
+  fetchAlerts,
+  fetchScrapingStatus,
+  fetchContestStatistics,
+  fetchSystemStatus,
+} from '../../services/api.ts';
 
 interface StatCardProps {
   title: string;

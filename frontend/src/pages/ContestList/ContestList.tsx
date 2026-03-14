@@ -36,10 +36,14 @@ import { format } from 'date-fns';
 
 import {
   fetchContests,
+  fetchSchools,
   fetchSubjects,
+  fetchLevels,
+  fetchShifts,
+  fetchContractTypes,
   fetchCities,
   fetchDepartments,
-} from '../../services/api';
+} from '../../services/api.ts';
 
 const ContestList: React.FC = () => {
   const [filters, setFilters] = useState({
@@ -93,6 +97,18 @@ const ContestList: React.FC = () => {
       is_active: true,
     });
     setPagination({ skip: 0, limit: 20 });
+  };
+
+  const handleLastWeekFilter = () => {
+    const today = new Date();
+    const oneWeekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+    
+    setFilters(prev => ({
+      ...prev,
+      date_from: oneWeekAgo.toISOString().split('T')[0],
+      date_to: today.toISOString().split('T')[0],
+    }));
+    setPagination(prev => ({ ...prev, skip: 0 })); // Reset to first page
   };
 
   const handlePageChange = (event: React.ChangeEvent<unknown>, value: number) => {
@@ -235,6 +251,17 @@ const ContestList: React.FC = () => {
                   Limpiar
                 </Button>
               </Box>
+            </Grid>
+
+            <Grid item xs={12} sm={6} md={3}>
+              <Button
+                variant="contained"
+                color="secondary"
+                onClick={handleLastWeekFilter}
+                fullWidth
+              >
+                Última Semana
+              </Button>
             </Grid>
           </Grid>
         </CardContent>

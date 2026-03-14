@@ -6,9 +6,12 @@ import { QueryClient, QueryClientProvider } from 'react-query';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 
-import App from './App';
-import { store } from './store/store';
+import App from './App.tsx';
+import { store } from './store/store.ts';
 import './index.css';
+
+// Importar el logger simple (comentado temporalmente)
+// import './utils/simpleLogger.js';
 
 // Create a client for React Query
 const queryClient = new QueryClient({

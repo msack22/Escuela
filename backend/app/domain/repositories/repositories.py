@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from sqlalchemy.orm import Session
-from app.domain.models.models import Contest, School, Subject, Alert, ScrapingLog
+from app.domain.models.models import Contest, School, Subject, Diploma, Alert, ScrapingLog
 
 
 class BaseRepository(ABC):
@@ -22,13 +22,13 @@ class ContestRepository(BaseRepository):
         return contest
     
     def get_by_id(self, contest_id: int) -> Optional[Contest]:
-        return self.db.query(Contest).filter(Contest.id == contest_id).first()
+        return self.db.query(Contest).join(School).join(Subject).filter(Contest.id == contest_id).first()
     
     def get_all(self, skip: int = 0, limit: int = 100) -> List[Contest]:
-        return self.db.query(Contest).offset(skip).limit(limit).all()
+        return self.db.query(Contest).join(School).join(Subject).offset(skip).limit(limit).all()
     
     def get_active_contests(self) -> List[Contest]:
-        return self.db.query(Contest).filter(Contest.is_active == True).all()
+        return self.db.query(Contest).join(School).join(Subject).filter(Contest.is_active == True).all()
     
     def get_by_filters(
         self, 
@@ -122,6 +122,73 @@ class SubjectRepository(BaseRepository):
             subject = Subject(name=name, description=description)
             return self.create(subject)
         return subject
+
+
+class DiplomaRepository(BaseRepository):
+    """Repository for Diploma operations"""
+    
+    def create(self, diploma: Diploma) -> Diploma:
+        self.db.add(diploma)
+        self.db.commit()
+        self.db.refresh(diploma)
+        return diploma
+    
+    def get_by_id(self, diploma_id: int) -> Optional[Diploma]:
+        return self.db.query(Diploma).join(School).join(Subject).filter(Diploma.id == diploma_id).first()
+    
+    def get_all(self, skip: int = 0, limit: int = 100) -> List[Diploma]:
+        return self.db.query(Diploma).join(School).join(Subject).offset(skip).limit(limit).all()
+    
+    def get_active_diplomas(self) -> List[Diploma]:
+        return self.db.query(Diploma).join(School).join(Subject).filter(Diploma.is_active == True).all()
+    
+    def get_by_filters(
+        self, 
+        subject_id: Optional[int] = None,
+        city: Optional[str] = None,
+        department: Optional[str] = None,
+        start_date_from: Optional[datetime] = None,
+        start_date_to: Optional[datetime] = None,
+        modality: Optional[str] = None,
+        target_audience: Optional[str] = None,
+        has_scholarship: Optional[bool] = None
+    ) -> List[Diploma]:
+        query = self.db.query(Diploma).join(School).join(Subject)
+        
+        if subject_id:
+            query = query.filter(Diploma.subject_id == subject_id)
+        if city:
+            query = query.filter(School.city.ilike(f"%{city}%"))
+        if department:
+            query = query.filter(School.department.ilike(f"%{department}%"))
+        if start_date_from:
+            query = query.filter(Diploma.start_date >= start_date_from)
+        if start_date_to:
+            query = query.filter(Diploma.start_date <= start_date_to)
+        if modality:
+            query = query.filter(Diploma.modality == modality)
+        if target_audience:
+            query = query.filter(Diploma.target_audience.ilike(f"%{target_audience}%"))
+        if has_scholarship is not None:
+            query = query.filter(Diploma.has_scholarship == has_scholarship)
+            
+        return query.all()
+    
+    def get_by_source_url(self, source_url: str) -> Optional[Diploma]:
+        return self.db.query(Diploma).filter(Diploma.source_url == source_url).first()
+    
+    def update(self, diploma: Diploma) -> Diploma:
+        self.db.commit()
+        self.db.refresh(diploma)
+        return diploma
+    
+    def delete(self, diploma_id: int) -> bool:
+        diploma = self.get_by_id(diploma_id)
+        if diploma:
+            self.db.delete(diploma)
+            self.db.commit()
+            return True
+        return False
 
 
 class AlertRepository(BaseRepository):

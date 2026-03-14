@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from datetime import datetime
+from pydantic import BaseModel
 
 
 @dataclass
@@ -27,6 +28,43 @@ class ScrapedContest:
     contract_type: Optional[str] = None      # tipo de contrato
 
 
+@dataclass
+class ScrapedDiploma:
+    """Data transfer object for scraped diploma/capacitación information"""
+    title: str
+    description: str
+    institution_name: str
+    institution_city: str
+    institution_department: str
+    source_url: str
+    source_name: str
+    
+    # Optional fields
+    modality: Optional[str] = None  # virtual, presencial, semipresencial
+    duration: Optional[str] = None  # ej: "3 meses", "120 horas"
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    registration_deadline: Optional[datetime] = None
+    
+    # Educational level
+    target_audience: Optional[str] = None  # docentes, directivos, etc.
+    level: Optional[str] = None  # inicial, primario, secundario, etc.
+    
+    # Cost information
+    price: Optional[int] = None  # precio en pesos argentinos
+    currency: str = "ARS"
+    has_scholarship: bool = False
+    scholarship_info: Optional[str] = None
+    
+    # Optional institution information
+    institution_address: Optional[str] = None
+    
+    # Contact information
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    contact_website: Optional[str] = None
+
+
 class BaseScraper(ABC):
     """Abstract base class for all scrapers following Strategy Pattern"""
     
@@ -46,6 +84,19 @@ class BaseScraper(ABC):
             List of ScrapedContest objects
         """
         pass
+    
+    async def scrape_diplomas(self, limit: Optional[int] = None) -> List[ScrapedDiploma]:
+        """
+        Scrape diplomas/capacitaciones from the source website.
+        
+        Args:
+            limit: Optional limit on number of diplomas to scrape
+        
+        Returns:
+            List of ScrapedDiploma objects
+        """
+        # Default implementation - return empty list
+        return []
     
     @abstractmethod
     async def is_available(self) -> bool:

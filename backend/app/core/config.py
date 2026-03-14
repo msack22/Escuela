@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     twilio_account_sid: Optional[str] = None
     twilio_auth_token: Optional[str] = None
     twilio_whatsapp_number: Optional[str] = None
+    sendgrid_api_key: Optional[str] = None
+    sender_email: Optional[str] = None
+    brevo_api_key: Optional[str] = None
     
     # Security
     secret_key: str = "your-secret-key-here"

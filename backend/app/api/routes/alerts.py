@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.application.services.alert_service import AlertService
+from app.infrastructure.notifications.multi_notifier import multi_notifier, NotificationChannel
 
 router = APIRouter()
 
@@ -12,18 +13,25 @@ router = APIRouter()
 class AlertCreate(BaseModel):
     user_name: str
     whatsapp_number: str
+    email_address: Optional[str] = None
     subject_preferences: List[str]
     max_distance_km: int = 50
+    notification_channels: str = "both"  # "whatsapp", "email", "both"
 
 
 class AlertUpdate(BaseModel):
     user_name: Optional[str] = None
+    whatsapp_number: Optional[str] = None
+    email_address: Optional[str] = None
     subject_preferences: Optional[List[str]] = None
     max_distance_km: Optional[int] = None
+    notification_channels: Optional[str] = None
 
 
 class TestNotificationRequest(BaseModel):
-    whatsapp_number: str
+    whatsapp_number: Optional[str] = None
+    email_address: Optional[str] = None
+    channels: List[str] = ["both"]  # ["whatsapp", "email", "both"]
 
 
 @router.post("/", response_model=dict)
@@ -116,12 +124,107 @@ async def deactivate_alert(alert_id: int, db: Session = Depends(get_db)):
 
 @router.post("/test-notification")
 async def send_test_notification(request: TestNotificationRequest, db: Session = Depends(get_db)):
-    """Send a test notification"""
-    service = AlertService(db)
+    """Send a test notification via multiple channels"""
+    try:
+        # Convertir string channels a NotificationChannel enum
+        notification_channels = []
+        for channel_str in request.channels:
+            if channel_str == "whatsapp":
+                notification_channels.append(NotificationChannel.WHATSAPP)
+            elif channel_str == "email":
+                notification_channels.append(NotificationChannel.EMAIL)
+            elif channel_str == "both":
+                notification_channels.append(NotificationChannel.BOTH)
+        
+        # Enviar notificación de prueba
+        results = await multi_notifier.send_test_notification(
+            recipient_whatsapp=request.whatsapp_number,
+            recipient_email=request.email_address,
+            channels=notification_channels
+        )
+        
+        # Obtener resumen
+        summary = multi_notifier.get_notification_summary(results)
+        
+        return {
+            "message": "Test notification sent",
+            "summary": summary,
+            "details": [
+                {
+                    "channel": result.channel.value,
+                    "success": result.success,
+                    "recipient": result.recipient,
+                    "error": result.error
+                }
+                for result in results
+            ]
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error sending test notification: {str(e)}")
+
+
+@router.get("/notification-channels")
+async def get_available_notification_channels():
+    """Get available notification channels"""
+    available_channels = multi_notifier.get_available_channels()
+    all_channels = ["whatsapp", "email", "both"]
     
-    success = await service.send_test_notification(request.whatsapp_number)
-    
-    if success:
-        return {"message": "Test notification sent successfully"}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to send test notification")
+    return {
+        "available": [channel.value for channel in available_channels],
+        "all": all_channels,
+        "status": {
+            channel.value: multi_notifier.is_available(channel)
+            for channel in [NotificationChannel.WHATSAPP, NotificationChannel.EMAIL, NotificationChannel.BOTH]
+        }
+    }
+
+
+@router.post("/send-multi")
+async def send_multi_notification(
+    recipient_whatsapp: Optional[str] = None,
+    recipient_email: Optional[str] = None,
+    message: str = "",
+    channels: List[str] = ["both"],
+    db: Session = Depends(get_db)
+):
+    """Send notification via multiple channels"""
+    try:
+        # Convertir string channels a NotificationChannel enum
+        notification_channels = []
+        for channel_str in channels:
+            if channel_str == "whatsapp":
+                notification_channels.append(NotificationChannel.WHATSAPP)
+            elif channel_str == "email":
+                notification_channels.append(NotificationChannel.EMAIL)
+            elif channel_str == "both":
+                notification_channels.append(NotificationChannel.BOTH)
+        
+        # Enviar notificación
+        results = await multi_notifier.send_notification(
+            recipient_whatsapp=recipient_whatsapp,
+            recipient_email=recipient_email,
+            channels=notification_channels,
+            message=message
+        )
+        
+        # Obtener resumen
+        summary = multi_notifier.get_notification_summary(results)
+        
+        return {
+            "message": "Notification sent",
+            "summary": summary,
+            "details": [
+                {
+                    "channel": result.channel.value,
+                    "success": result.success,
+                    "recipient": result.recipient,
+                    "error": result.error,
+                    "timestamp": result.timestamp.isoformat()
+                }
+                for result in results
+            ]
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error sending notification: {str(e)}")

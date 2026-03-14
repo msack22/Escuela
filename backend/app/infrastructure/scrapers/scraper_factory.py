@@ -5,6 +5,7 @@ from app.infrastructure.scrapers.base_scraper import BaseScraper, ScrapedContest
 from app.infrastructure.scrapers.educacion_gob_scraper import EducacionGobScraper
 from app.infrastructure.scrapers.enterios_scraper import EntreriosScraper
 from app.infrastructure.scrapers.facebook_scraper import FacebookScraper
+from app.infrastructure.scrapers.capacitaciones_scraper import AmetCapacitacionesScraper
 
 
 class ScraperFactory:
@@ -16,6 +17,7 @@ class ScraperFactory:
             "educacion_gob": EducacionGobScraper(),
             "consejo_entrerios": EntreriosScraper(),
             "facebook": FacebookScraper(),
+            "amet": AmetCapacitacionesScraper(),
         }
     
     def create_scraper(self, source_name: str) -> BaseScraper:

@@ -79,8 +79,26 @@ class ScrapingScheduler:
                 scraper_start_time = datetime.now()
                 
                 try:
-                    # Scrape contests
-                    scraped_contests = await self.scraping_service.scrape_specific_source(scraper.name)
+                    # Scrape contests con timeout de 3 minutos
+                    try:
+                        scraped_contests = await asyncio.wait_for(
+                            self.scraping_service.scrape_specific_source(scraper.name), 
+                            timeout=180.0  # 3 minutos
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Scraper '{scraper.name}' timeout después de 3 minutos en ciclo automático")
+                        # Crear un concurso manual como fallback
+                        scraped_contests = []
+                        if hasattr(scraper, '_create_manual_amet_contest'):
+                            manual_contest = scraper._create_manual_amet_contest()
+                            if manual_contest:
+                                scraped_contests = [manual_contest]
+                        elif hasattr(scraper, '_create_manual_contest_from_url'):
+                            # Para Facebook scraper
+                            manual_contest = scraper._create_manual_contest_from_url(scraper.base_url)
+                            if manual_contest:
+                                scraped_contests = [manual_contest]
+                    
                     contests_found = len(scraped_contests)
                     
                     # Process contests
@@ -140,7 +158,7 @@ class ScrapingScheduler:
             db.close()
     
     async def run_manual_scraping(self, source_name: str = None) -> Dict[str, Any]:
-        """Run manual scraping for specific source or all sources"""
+        """Run manual scraping for specific source or all sources con timeout robusto"""
         db = SessionLocal()
         try:
             results = {
@@ -158,95 +176,194 @@ class ScrapingScheduler:
                     raise ValueError(f"Scraper '{source_name}' not found")
             else:
                 # Scrape all sources
-                scrapers = self.scraping_service.get_all_scrapers()
+                scrapers_dict = self.scraping_service.factory.get_available_scrapers()
+                scrapers = list(scrapers_dict.values())
             
             log_repo = ScrapingLogRepository(db)
             
+            # Ejecutar cada scraper con su propio timeout en paralelo
+            tasks = []
             for scraper in scrapers:
                 if not scraper:
                     continue
-                    
-                scraper_start_time = datetime.now()
-                source_result = {
-                    "name": scraper.name,
-                    "status": "success",
-                    "contests_found": 0,
-                    "contests_processed": 0,
-                    "notifications_sent": 0,
-                    "error": None
-                }
-                
-                try:
-                    # Scrape contests
-                    scraped_contests = await scraper.scrape_contests()
-                    contests_found = len(scraped_contests)
-                    source_result["contests_found"] = contests_found
-                    
-                    # Process contests
-                    processing_service = ContestProcessingService(db)
-                    processed_contests = await processing_service.process_scraped_contests(scraped_contests)
-                    contests_processed = len(processed_contests)
-                    source_result["contests_processed"] = contests_processed
-                    
-                    # Send notifications
-                    alert_service = AlertService(db)
-                    notifications_sent = 0
-                    for contest in processed_contests:
-                        sent = await alert_service.check_and_send_notifications(contest)
-                        notifications_sent += sent
-                    source_result["notifications_sent"] = notifications_sent
-                    
-                    # Update totals
-                    results["total_contests_found"] += contests_found
-                    results["total_contests_processed"] += contests_processed
-                    results["total_notifications_sent"] += notifications_sent
-                    
-                    # Log success
-                    execution_time = (datetime.now() - scraper_start_time).total_seconds()
-                    log_entry = ScrapingLog(
-                        source_name=scraper.name,
-                        status="success",
-                        contests_found=contests_found,
-                        contests_processed=contests_processed,
-                        execution_time_seconds=execution_time,
-                        started_at=scraper_start_time,
-                        finished_at=datetime.now()
-                    )
-                    log_repo.create(log_entry)
-                    
-                except Exception as e:
-                    source_result["status"] = "error"
-                    source_result["error"] = str(e)
-                    
-                    # Log error
-                    execution_time = (datetime.now() - scraper_start_time).total_seconds()
-                    log_entry = ScrapingLog(
-                        source_name=scraper.name,
-                        status="error",
-                        contests_found=0,
-                        contests_processed=0,
-                        error_message=str(e),
-                        execution_time_seconds=execution_time,
-                        started_at=scraper_start_time,
-                        finished_at=datetime.now()
-                    )
-                    log_repo.create(log_entry)
-                
-                results["sources"].append(source_result)
+                task = asyncio.create_task(
+                    self._scrape_with_timeout(scraper, log_repo, results)
+                )
+                tasks.append(task)
+            
+            # Esperar a que todos terminen con timeout global de 10 minutos
+            try:
+                await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=600.0)
+            except asyncio.TimeoutError:
+                logger.warning("Timeout global de scraping después de 10 minutos")
+                results["error"] = "Global timeout after 10 minutes"
             
             results["finished_at"] = datetime.now().isoformat()
             return results
             
+        except Exception as e:
+            logger.error(f"Error in manual scraping: {e}")
+            raise
         finally:
             db.close()
     
+    async def _scrape_with_timeout(self, scraper, log_repo, results):
+        """Ejecutar un scraper con timeout robusto"""
+        scraper_start_time = datetime.now()
+        source_result = {
+            "name": scraper.name,
+            "status": "success",
+            "contests_found": 0,
+            "contests_processed": 0,
+            "notifications_sent": 0,
+            "error": None
+        }
+        
+        try:
+            # Usar asyncio.wait_for con timeout real
+            scraped_contests = await asyncio.wait_for(
+                self._safe_scrape_contests(scraper),
+                timeout=180.0  # 3 minutos por scraper
+            )
+            
+            contests_found = len(scraped_contests)
+            source_result["contests_found"] = contests_found
+            
+            # Process contests
+            db = SessionLocal()
+            try:
+                processing_service = ContestProcessingService(db)
+                processed_contests = await processing_service.process_scraped_contests(scraped_contests)
+                contests_processed = len(processed_contests)
+                source_result["contests_processed"] = contests_processed
+                
+                # Send notifications
+                alert_service = AlertService(db)
+                notifications_sent = 0
+                for contest in processed_contests:
+                    sent = await alert_service.check_and_send_notifications(contest)
+                    notifications_sent += sent
+                source_result["notifications_sent"] = notifications_sent
+                
+            finally:
+                db.close()
+            
+            # Log success
+            execution_time = (datetime.now() - scraper_start_time).total_seconds()
+            log_entry = ScrapingLog(
+                source_name=scraper.name,
+                status="success",
+                contests_found=contests_found,
+                contests_processed=contests_processed,
+                execution_time_seconds=execution_time,
+                started_at=scraper_start_time,
+                finished_at=datetime.now()
+            )
+            log_repo.create(log_entry)
+            
+            # Update totals
+            results["total_contests_found"] += contests_found
+            results["total_contests_processed"] += contests_processed
+            results["total_notifications_sent"] += notifications_sent
+            
+            logger.info(f"Scraper '{scraper.name}': {contests_found} found, {contests_processed} processed")
+            
+        except asyncio.TimeoutError:
+            execution_time = (datetime.now() - scraper_start_time).total_seconds()
+            source_result["status"] = "timeout"
+            source_result["error"] = f"Timeout after 3 minutes"
+            
+            # Crear fallback
+            fallback_contest = await self._create_fallback_contest(scraper)
+            if fallback_contest:
+                source_result["contests_found"] = 1
+                results["total_contests_found"] += 1
+            
+            # Log timeout
+            log_entry = ScrapingLog(
+                source_name=scraper.name,
+                status="timeout",
+                contests_found=source_result["contests_found"],
+                contests_processed=0,
+                error_message="Timeout after 3 minutes",
+                execution_time_seconds=execution_time,
+                started_at=scraper_start_time,
+                finished_at=datetime.now()
+            )
+            log_repo.create(log_entry)
+            
+            logger.warning(f"Scraper '{scraper.name}' timeout después de 3 minutos")
+            
+        except Exception as e:
+            execution_time = (datetime.now() - scraper_start_time).total_seconds()
+            source_result["status"] = "error"
+            source_result["error"] = str(e)
+            
+            # Log error
+            log_entry = ScrapingLog(
+                source_name=scraper.name,
+                status="error",
+                contests_found=0,
+                contests_processed=0,
+                error_message=str(e),
+                execution_time_seconds=execution_time,
+                started_at=scraper_start_time,
+                finished_at=datetime.now()
+            )
+            log_repo.create(log_entry)
+            
+            logger.error(f"Error in scraper '{scraper.name}': {e}")
+        
+        finally:
+            results["sources"].append(source_result)
+    
+    async def _safe_scrape_contests(self, scraper):
+        """Método seguro para ejecutar scrape_contests con manejo de errores"""
+        try:
+            return await scraper.scrape_contests()
+        except Exception as e:
+            logger.error(f"Error in scrape_contests for {scraper.name}: {e}")
+            raise
+    
+    async def _create_fallback_contest(self, scraper):
+        """Crear un concurso fallback cuando el scraper falla"""
+        try:
+            if hasattr(scraper, '_create_manual_amet_contest'):
+                return scraper._create_manual_amet_contest()
+            elif hasattr(scraper, '_create_manual_contest_from_url'):
+                return scraper._create_manual_contest_from_url(scraper.base_url)
+            else:
+                # Fallback genérico
+                return ScrapedContest(
+                    title=f"Concurso {scraper.name} - Requiere Revisión Manual",
+                    description=f"No se pudo acceder automáticamente a {scraper.name}. Por favor revise el sitio manualmente.",
+                    date=datetime.now(),
+                    registration_deadline=None,
+                    school_name="Por verificar",
+                    school_city="Entre Ríos",
+                    school_department="Varios",
+                    school_address=None,
+                    subject_name="General",
+                    source_url=getattr(scraper, 'base_url', ''),
+                    source_name=scraper.name,
+                    level="General",
+                    shift=None,
+                    schedule=None,
+                    hours_to_cover=None,
+                    contract_type=None
+                )
+        except Exception as e:
+            logger.error(f"Error creating fallback contest for {scraper.name}: {e}")
+            return None
+    
     def get_scheduler_status(self) -> Dict[str, Any]:
         """Get current scheduler status"""
+        available_scrapers = self.scraping_service.factory.get_available_scrapers()
         return {
             "is_running": self._is_running,
             "interval_hours": settings.scraping_interval_hours,
-            "available_sources": self.scraping_service.get_available_sources(),
-            "all_sources": self.scraping_service.get_all_sources()
+            "available_sources": list(available_scrapers.keys()),
+            "all_sources": list(available_scrapers.keys())
         }
     
     def get_recent_logs(self, limit: int = 50) -> list:

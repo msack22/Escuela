@@ -36,13 +36,20 @@ class ContestSearchService:
     
     def search_contests(self, filters: ContestFilter, skip: int = 0, limit: int = 100) -> List[Dict[str, Any]]:
         """Search contests with filters and return formatted results"""
-        contests = self.contest_repo.get_by_filters(
-            subject_id=filters.subject_id,
-            city=filters.city,
-            department=filters.department,
-            date_from=filters.date_from,
-            date_to=filters.date_to
-        )
+        # Always use get_all() to ensure relationships are loaded, then apply filters
+        contests = self.contest_repo.get_all()
+        
+        # Apply filters manually
+        if filters.subject_id:
+            contests = [c for c in contests if c.subject_id == filters.subject_id]
+        if filters.city:
+            contests = [c for c in contests if c.school and filters.city.lower() in c.school.city.lower()]
+        if filters.department:
+            contests = [c for c in contests if c.school and filters.department.lower() in c.school.department.lower()]
+        if filters.date_from:
+            contests = [c for c in contests if c.date and c.date >= filters.date_from]
+        if filters.date_to:
+            contests = [c for c in contests if c.date and c.date <= filters.date_to]
         
         # Apply additional filters
         if filters.school_name:
@@ -88,6 +95,7 @@ class ContestSearchService:
     
     def _format_contest(self, contest: Contest) -> Dict[str, Any]:
         """Format contest data for API response"""
+        print(f"DEBUG: Contest ID {contest.id}, school: {contest.school}, subject: {contest.subject}")
         return {
             "id": contest.id,
             "title": contest.title,
@@ -95,20 +103,20 @@ class ContestSearchService:
             "date": contest.date.isoformat() if contest.date else None,
             "registration_deadline": contest.registration_deadline.isoformat() if contest.registration_deadline else None,
             "school": {
-                "id": contest.school.id,
-                "name": contest.school.name,
-                "city": contest.school.city,
-                "department": contest.school.department,
-                "address": contest.school.address,
-                "latitude": contest.school.latitude,
-                "longitude": contest.school.longitude,
-                "school_type": contest.school.school_type,
-                "school_number": contest.school.school_number
+                "id": contest.school.id if contest.school else None,
+                "name": contest.school.name if contest.school else None,
+                "city": contest.school.city if contest.school else None,
+                "department": contest.school.department if contest.school else None,
+                "address": contest.school.address if contest.school else None,
+                "latitude": contest.school.latitude if contest.school else None,
+                "longitude": contest.school.longitude if contest.school else None,
+                "school_type": contest.school.school_type if contest.school else None,
+                "school_number": contest.school.school_number if contest.school else None
             },
             "subject": {
-                "id": contest.subject.id,
-                "name": contest.subject.name,
-                "description": contest.subject.description
+                "id": contest.subject.id if contest.subject else None,
+                "name": contest.subject.name if contest.subject else None,
+                "description": contest.subject.description if contest.subject else None
             },
             "source": {
                 "url": contest.source_url,

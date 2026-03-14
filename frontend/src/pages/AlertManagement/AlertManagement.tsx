@@ -40,7 +40,7 @@ import {
   deleteAlert,
   sendTestNotification,
   fetchSubjects,
-} from '../../services/api';
+} from '../../services/api.ts';
 
 const AlertManagement: React.FC = () => {
   const [openDialog, setOpenDialog] = useState(false);

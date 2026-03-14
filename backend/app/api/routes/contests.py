@@ -5,8 +5,22 @@ from datetime import datetime
 
 from app.core.database import get_db
 from app.application.services.contest_search_service import ContestSearchService, ContestFilter
+from app.domain.models.models import Contest
 
 router = APIRouter()
+
+
+@router.delete("/clear")
+async def clear_all_contests(db: Session = Depends(get_db)):
+    """Clear all contests (temporary endpoint for testing)"""
+    try:
+        # Delete all contests
+        db.query(Contest).delete()
+        db.commit()
+        return {"message": "All contests cleared successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/", response_model=dict)

@@ -27,6 +27,7 @@ class School(Base):
     
     # Relationships
     contests = relationship("Contest", back_populates="school")
+    diplomas = relationship("Diploma", back_populates="school")
 
 
 class Subject(Base):
@@ -39,6 +40,63 @@ class Subject(Base):
     
     # Relationships
     contests = relationship("Contest", back_populates="subject")
+    diplomas = relationship("Diploma", back_populates="subject")
+
+
+class Diploma(Base):
+    __tablename__ = "diplomas"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(500), nullable=False, index=True)
+    description = Column(Text)
+    
+    # Diploma specific information
+    modality = Column(String(50), nullable=True, index=True)  # virtual, presencial, semipresencial
+    duration = Column(String(100), nullable=True)  # ej: "3 meses", "120 horas"
+    start_date = Column(DateTime(timezone=True), nullable=True, index=True)
+    end_date = Column(DateTime(timezone=True), nullable=True)
+    registration_deadline = Column(DateTime(timezone=True), nullable=True)
+    
+    # Educational level
+    target_audience = Column(String(100), nullable=True, index=True)  # docentes, directivos, etc.
+    level = Column(String(50), nullable=True, index=True)  # inicial, primario, secundario, etc.
+    
+    # Cost information
+    price = Column(Integer, nullable=True)  # precio en pesos argentinos
+    currency = Column(String(10), default="ARS")
+    has_scholarship = Column(Boolean, default=False)
+    scholarship_info = Column(Text, nullable=True)
+    
+    # Institution information
+    institution_name = Column(String(255), nullable=False, index=True)
+    institution_city = Column(String(100), nullable=False, index=True)
+    institution_department = Column(String(100), nullable=False, index=True)
+    institution_address = Column(Text, nullable=True)
+    
+    # Foreign Keys
+    school_id = Column(Integer, ForeignKey("schools.id"), nullable=False)
+    subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=False)
+    
+    # Contact information
+    contact_email = Column(String(255), nullable=True)
+    contact_phone = Column(String(50), nullable=True)
+    contact_website = Column(String(500), nullable=True)
+    
+    # Source information
+    source_url = Column(String(1000), nullable=False)
+    source_name = Column(String(255), nullable=False)
+    
+    # Status
+    is_active = Column(Boolean, default=True, index=True)
+    is_processed = Column(Boolean, default=False)
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    school = relationship("School", back_populates="diplomas")
+    subject = relationship("Subject", back_populates="diplomas")
 
 
 class Contest(Base):
@@ -85,10 +143,14 @@ class Alert(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_name = Column(String(255), nullable=False)
     whatsapp_number = Column(String(20), nullable=False)
+    email_address = Column(String(255), nullable=True)  # Nuevo campo para email
     
     # Alert criteria
     subject_preferences = Column(Text)  # JSON string of preferred subjects
     max_distance_km = Column(Integer, default=50)
+    
+    # Notification preferences
+    notification_channels = Column(String(50), default="both")  # "whatsapp", "email", "both"
     
     # Status
     is_active = Column(Boolean, default=True, index=True)

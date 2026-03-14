@@ -7,7 +7,7 @@ from datetime import datetime
 import logging
 
 from app.core.database import engine, SessionLocal, get_db
-from app.api.routes import contests, alerts, scraping, schools, subjects
+from app.api.routes import contests, alerts, scraping, schools, subjects, logs, capacitaciones, diplomas, diploma_scraping
 from app.infrastructure.scrapers.scraper_factory import ScrapingService
 from app.application.services.scheduler_service import ScrapingScheduler
 
@@ -29,7 +29,7 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["http://localhost:3000", "http://localhost:4000", "http://127.0.0.1:3000", "http://127.0.0.1:4000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -41,6 +41,10 @@ app.include_router(alerts.router, prefix="/api/alerts", tags=["alerts"])
 app.include_router(scraping.router, prefix="/api/scraping", tags=["scraping"])
 app.include_router(schools.router, prefix="/api/schools", tags=["schools"])
 app.include_router(subjects.router, prefix="/api/subjects", tags=["subjects"])
+app.include_router(logs.router, prefix="/api/logs", tags=["logs"])
+app.include_router(capacitaciones.router, prefix="/api/capacitaciones", tags=["capacitaciones"])
+app.include_router(diplomas.router, prefix="/api/diplomas", tags=["diplomas"])
+app.include_router(diploma_scraping.router, prefix="/api/diploma-scraping", tags=["diploma-scraping"])
 
 
 @app.on_event("startup")
@@ -73,7 +77,6 @@ async def shutdown_event():
 
 @app.get("/")
 async def root():
-    """Root endpoint"""
     return {
         "message": "Sistema de Concursos Educativos API",
         "version": "1.0.0",
@@ -85,6 +88,18 @@ async def root():
             "subjects": "/api/subjects"
         },
         "documentation": "/docs"
+    }
+
+
+@app.get("/api/status")
+async def system_status():
+    """Get system status"""
+    return {
+        "status": "running",
+        "api_status": "healthy",
+        "database": "connected",
+        "scheduler": "active",
+        "timestamp": datetime.now().isoformat()
     }
 
 

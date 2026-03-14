@@ -2,11 +2,11 @@ import React from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { Container } from '@mui/material';
 
-import Navbar from './components/Navbar/Navbar';
-import ContestList from './pages/ContestList/ContestList';
-import AlertManagement from './pages/AlertManagement/AlertManagement';
-import Dashboard from './pages/Dashboard/Dashboard';
-import ScrapingStatus from './pages/ScrapingStatus/ScrapingStatus';
+import Navbar from './components/Navbar/Navbar.tsx';
+import ContestList from './pages/ContestList/ContestList.tsx';
+import AlertManagement from './pages/AlertManagement/AlertManagement.tsx';
+import Dashboard from './pages/Dashboard/Dashboard.tsx';
+import ScrapingStatus from './pages/ScrapingStatus/ScrapingStatus.tsx';
 
 function App() {
   return (

@@ -36,11 +36,13 @@ import { format } from 'date-fns';
 
 import {
   fetchScrapingStatus,
-  fetchScrapingLogs,
+  fetchSystemStatus,
+  triggerManualScraping,
   runManualScraping,
   startScheduler,
   stopScheduler,
-} from '../../services/api';
+  fetchScrapingLogs,
+} from '../../services/api.ts';
 
 const ScrapingStatus: React.FC = () => {
   const [selectedSource, setSelectedSource] = useState('');
