@@ -122,8 +122,11 @@ tmp/
 temp/
 *.tmp
 
+# Documentation build
+docs/build/
+
 # Documentation and research
-docs/
+!docs/guia/
 *.md
 !README.md
 

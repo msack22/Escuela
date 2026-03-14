@@ -9,9 +9,8 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: tu_password
       MYSQL_DATABASE: concursos_db
-      MYSQL_USER: root
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     networks:

@@ -35,9 +35,12 @@ class BaseScraper(ABC):
         self.base_url = base_url
     
     @abstractmethod
-    async def scrape_contests(self) -> List[ScrapedContest]:
+    async def scrape_contests(self, limit: Optional[int] = None) -> List[ScrapedContest]:
         """
         Scrape contests from the source website.
+        
+        Args:
+            limit: Optional limit on number of contests to scrape
         
         Returns:
             List of ScrapedContest objects
@@ -45,7 +48,7 @@ class BaseScraper(ABC):
         pass
     
     @abstractmethod
-    def is_available(self) -> bool:
+    async def is_available(self) -> bool:
         """
         Check if the scraper source is available.
         

@@ -18,7 +18,7 @@ class EntreriosScraper(BaseScraper):
             base_url="https://cge.entrerios.gov.ar"
         )
     
-    async def scrape_contests(self) -> List[ScrapedContest]:
+    async def scrape_contests(self, limit: Optional[int] = None) -> List[ScrapedContest]:
         """Scrape contests from Entre Ríos website"""
         contests = []
         
@@ -342,7 +342,7 @@ class EntreriosScraper(BaseScraper):
         
         return "General"
     
-    def is_available(self) -> bool:
+    async def is_available(self) -> bool:
         """Check if the scraper source is available"""
         try:
             async with aiohttp.ClientSession() as session:

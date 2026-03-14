@@ -1,7 +1,7 @@
 import aiohttp
 import asyncio
 from typing import Dict, List
-from app.infrastructure.scrapers.base_scraper import BaseScraper
+from app.infrastructure.scrapers.base_scraper import BaseScraper, ScrapedContest
 from app.infrastructure.scrapers.educacion_gob_scraper import EducacionGobScraper
 from app.infrastructure.scrapers.enterios_scraper import EntreriosScraper
 from app.infrastructure.scrapers.facebook_scraper import FacebookScraper
@@ -10,33 +10,28 @@ from app.infrastructure.scrapers.facebook_scraper import FacebookScraper
 class ScraperFactory:
     """Factory class for creating scrapers following Factory Pattern"""
     
-    @staticmethod
-    def create_scraper(source_name: str) -> BaseScraper:
-        """Create appropriate scraper instance based on source name"""
-        scrapers = {
+    def __init__(self):
+        """Initialize factory with scrapers"""
+        self.scrapers = {
             "educacion_gob": EducacionGobScraper(),
             "consejo_entrerios": EntreriosScraper(),
             "facebook": FacebookScraper(),
         }
-        
-        if source_name in scrapers:
-            return scrapers[source_name]
+    
+    def create_scraper(self, source_name: str) -> BaseScraper:
+        """Create appropriate scraper instance based on source name"""
+        if source_name in self.scrapers:
+            return self.scrapers[source_name]
         
         raise ValueError(f"Unknown scraper source: {source_name}")
     
-    @staticmethod
-    def get_available_scrapers() -> Dict[str, BaseScraper]:
+    def get_available_scrapers(self) -> Dict[str, BaseScraper]:
         """Get all available scrapers"""
-        return {
-            "educacion_gob": EducacionGobScraper(),
-            "consejo_entrerios": EntreriosScraper(),
-            "facebook": FacebookScraper(),
-        }
+        return self.scrapers
     
-    @staticmethod
-    def get_scraper_names() -> List[str]:
+    def get_scraper_names(self) -> List[str]:
         """Get list of available scraper names"""
-        return ["educacion_gob", "consejo_entrerios", "facebook"]
+        return list(self.scrapers.keys())
 
 
 class ScrapingService:
@@ -59,11 +54,11 @@ class ScrapingService:
         """Register default scrapers"""
         from app.infrastructure.scrapers.educacion_gob_scraper import EducacionGobScraper
         
-        self.factory.register_scraper("educacion_gob", EducacionGobScraper())
+        self.factory.scrapers["educacion_gob"] = EducacionGobScraper()
         
         # Add more scrapers here as they are created
-        # self.factory.register_scraper("portal_educacion", PortalEducacionScraper())
-        # self.factory.register_scraper("consejo_educacion", ConsejoEducacionScraper())
+        # self.factory.scrapers["portal_educacion"] = PortalEducacionScraper()
+        # self.factory.scrapers["consejo_educacion"] = ConsejoEducacionScraper()
     
     async def scrape_all_sources(self) -> List[ScrapedContest]:
         """Scrape contests from all available sources"""

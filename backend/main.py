@@ -2,14 +2,13 @@ from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from datetime import datetime
+import logging
 
 from app.core.database import engine, SessionLocal, get_db
-from app.api.routes import contests, alerts, scraping, schools, subjects, calendar
-from app.infrastructure.scrapers.scraping_service import ScrapingService
+from app.api.routes import contests, alerts, scraping, schools, subjects
+from app.infrastructure.scrapers.scraper_factory import ScrapingService
 from app.application.services.scheduler_service import ScrapingScheduler
 
 # Configure logging
@@ -42,7 +41,6 @@ app.include_router(alerts.router, prefix="/api/alerts", tags=["alerts"])
 app.include_router(scraping.router, prefix="/api/scraping", tags=["scraping"])
 app.include_router(schools.router, prefix="/api/schools", tags=["schools"])
 app.include_router(subjects.router, prefix="/api/subjects", tags=["subjects"])
-app.include_router(calendar.router, prefix="/api/calendar", tags=["calendar"])
 
 
 @app.on_event("startup")
@@ -52,11 +50,11 @@ async def startup_event():
     
     # Initialize scraping service
     scraping_service = ScrapingService()
-    await scraping_service.initialize()
+    # await scraping_service.initialize()  # Comentado temporalmente
     
     # Start scheduler
-    scheduler = ScrapingScheduler()
-    await scheduler.start()
+    # scheduler = ScrapingScheduler()
+    # await scheduler.start()  # Comentado temporalmente
     
     logger.info("Application started successfully")
 
@@ -84,8 +82,7 @@ async def root():
             "alerts": "/api/alerts", 
             "scraping": "/api/scraping",
             "schools": "/api/schools",
-            "subjects": "/api/subjects",
-            "calendar": "/api/calendar"
+            "subjects": "/api/subjects"
         },
         "documentation": "/docs"
     }

@@ -7,9 +7,10 @@ import re
 from urllib.parse import urljoin
 
 from app.infrastructure.scrapers.base_scraper import BaseScraper, ScrapedContest
+from app.core.logging_config import LoggerMixin, performance_logger
 
 
-class EducacionGobScraper(BaseScraper):
+class EducacionGobScraper(BaseScraper, LoggerMixin):
     """Scraper for educación.gob.ar or similar government education sites"""
     
     def __init__(self):
@@ -18,9 +19,12 @@ class EducacionGobScraper(BaseScraper):
             base_url="https://www.argentina.gob.ar/educacion"
         )
     
-    async def scrape_contests(self) -> List[ScrapedContest]:
+    async def scrape_contests(self, limit: Optional[int] = None) -> List[ScrapedContest]:
         """Scrape contests from government education website"""
+        start_time = datetime.now()
         contests = []
+        
+        self.log_info("Iniciando scraping", source=self.name, limit=limit)
         
         try:
             async with aiohttp.ClientSession() as session:
@@ -44,7 +48,11 @@ class EducacionGobScraper(BaseScraper):
                         continue
                         
         except Exception as e:
-            print(f"Error in EducacionGobScraper: {e}")
+            self.log_error("Error en EducacionGobScraper", error=e, source=self.name)
+        finally:
+            duration = (datetime.now() - start_time).total_seconds()
+            performance_logger.log_scraping_operation(self.name, len(contests), duration)
+            self.log_info("Scraping completado", source=self.name, contests_found=len(contests), duration=duration)
         
         return contests
     
@@ -272,20 +280,11 @@ class EducacionGobScraper(BaseScraper):
         
         return "General"  # Default
     
-    def is_available(self) -> bool:
+    async def is_available(self) -> bool:
         """Check if the website is available"""
         try:
-            import aiohttp
-            import asyncio
-            
-            async def check():
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(self.base_url, timeout=5) as response:
-                            return response.status == 200
-                except:
-                    return False
-            
-            return asyncio.run(check())
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.base_url, timeout=5) as response:
+                    return response.status == 200
         except:
             return False

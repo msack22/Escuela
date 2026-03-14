@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { logger, useApiLogger } from '../utils/logger_simple';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
@@ -56,6 +57,43 @@ export const fetchContractTypes = async () => {
   const response = await api.get('/api/contests/filters/contract-types');
   return response.data;
 };
+
+// Interceptor para logging de peticiones
+api.interceptors.request.use(
+  (config) => {
+    logger.info('API_REQUEST', `Starting ${config.method?.toUpperCase()} ${config.url}`, {
+      method: config.method,
+      url: config.url,
+      headers: config.headers,
+    });
+    return config;
+  },
+  (error) => {
+    logger.error('API_REQUEST_ERROR', 'Request failed', { error: error.message });
+    return Promise.reject(error);
+  }
+);
+
+api.interceptors.response.use(
+  (response) => {
+    logger.info('API_RESPONSE', `Response received: ${response.status}`, {
+      status: response.status,
+      url: response.config.url,
+      method: response.config.method,
+      duration: response.config.metadata?.duration,
+    });
+    return response;
+  },
+  (error) => {
+    logger.error('API_RESPONSE_ERROR', 'Response failed', {
+      status: error.response?.status,
+      url: error.config?.url,
+      method: error.config?.method,
+      error: error.message,
+    });
+    return Promise.reject(error);
+  }
+);
 
 // Alert API calls
 export const fetchAlerts = async () => {

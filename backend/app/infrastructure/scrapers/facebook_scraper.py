@@ -4,6 +4,7 @@ from typing import List, Optional
 from datetime import datetime
 import re
 from urllib.parse import urljoin
+from bs4 import BeautifulSoup
 
 from app.infrastructure.scrapers.base_scraper import BaseScraper, ScrapedContest
 
@@ -17,7 +18,7 @@ class FacebookScraper(BaseScraper):
             base_url="https://www.facebook.com"
         )
     
-    async def scrape_contests(self) -> List[ScrapedContest]:
+    async def scrape_contests(self, limit: Optional[int] = None) -> List[ScrapedContest]:
         """Scrape contests from Facebook pages related to Entre Ríos"""
         contests = []
         
@@ -347,7 +348,7 @@ class FacebookScraper(BaseScraper):
                 return subject.title()
         return "Educación"
     
-    def is_available(self) -> bool:
+    async def is_available(self) -> bool:
         """Check if the scraper source is available"""
         try:
             async with aiohttp.ClientSession() as session:
