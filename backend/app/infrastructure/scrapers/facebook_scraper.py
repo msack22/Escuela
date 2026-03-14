@@ -7,6 +7,7 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
 from app.infrastructure.scrapers.base_scraper import BaseScraper, ScrapedContest
+from app.infrastructure.scrapers.pattern_learning import PatternLearning
 
 
 class FacebookScraper(BaseScraper):
@@ -17,6 +18,48 @@ class FacebookScraper(BaseScraper):
             name="Facebook Pages - Entre Ríos",
             base_url="https://www.facebook.com"
         )
+        self.pattern_learning = PatternLearning("facebook_patterns.json")
+        self._initialize_facebook_patterns()
+    
+    def _initialize_facebook_patterns(self):
+        """Inicializar patrones específicos de Facebook"""
+        facebook_patterns = [
+            {
+                'type': 'facebook_dde',
+                'pattern': r'facebook\.com/dde\w+',
+                'description': 'Páginas de DDEs en Facebook',
+                'examples': ['facebook.com/ddeislasdelibicuy', 'facebook.com/ddeparana'],
+                'confidence': 0.9
+            },
+            {
+                'type': 'facebook_cge',
+                'pattern': r'facebook\.com/cge\w+',
+                'description': 'Páginas del CGE en Facebook',
+                'examples': ['facebook.com/cge.entrerios'],
+                'confidence': 0.8
+            },
+            {
+                'type': 'facebook_educacion',
+                'pattern': r'facebook\.com/educacion\w+',
+                'description': 'Páginas de Educación en Facebook',
+                'examples': ['facebook.com/educacionentrerios'],
+                'confidence': 0.7
+            },
+            {
+                'type': 'facebook_amet',
+                'pattern': r'facebook\.com/amet\w+',
+                'description': 'Páginas de AMET en Facebook',
+                'examples': ['facebook.com/AMETEntreRios'],
+                'confidence': 0.8
+            }
+        ]
+        
+        self.pattern_learning.patterns_data['learned_patterns'] = facebook_patterns
+        self.pattern_learning.patterns_data['last_updated'] = datetime.now().isoformat()
+        self.pattern_learning._save_patterns()
+        
+        stats = self.pattern_learning.get_statistics()
+        print(f"📘 Patrones de Facebook inicializados: {stats['total_patterns']} patrones")
     
     async def scrape_contests(self, limit: Optional[int] = None) -> List[ScrapedContest]:
         """Scrape contests from Facebook - exploración exhaustiva"""

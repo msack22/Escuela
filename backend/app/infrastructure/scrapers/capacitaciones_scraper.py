@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional
 from urllib.parse import urljoin, urlparse
 
 from app.infrastructure.scrapers.base_scraper import BaseScraper, ScrapedContest, ScrapedDiploma
+from app.infrastructure.scrapers.pattern_learning import PatternLearning
 
 
 class ScrapedCapacitacion:

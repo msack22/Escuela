@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 
 from app.infrastructure.scrapers.base_scraper import BaseScraper, ScrapedContest
 from app.infrastructure.scrapers.url_cache import URLCache
+from app.infrastructure.scrapers.pattern_learning import PatternLearning
 
 
 class EntreriosScraper(BaseScraper):
@@ -19,6 +20,27 @@ class EntreriosScraper(BaseScraper):
             base_url="https://cge.entrerios.gov.ar"
         )
         self.url_cache = URLCache("cge_urls.json")
+        self.pattern_learning = PatternLearning("cge_patterns.json")
+        
+        # Inicializar el sistema de aprendizaje con URLs conocidas
+        self._initialize_learning_system()
+    
+    def _initialize_learning_system(self):
+        """Inicializar el sistema de aprendizaje con URLs conocidas"""
+        initial_urls = [
+            "https://cge.entrerios.gov.ar/2026/03/convocatoria-escuela-secundaria-n-3-francisco-ramirez/",
+            "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-ciencias-de-la-historia-escuela-secundaria-n4-anselmo-sean-valiente/",
+            "https://cge.entrerios.gov.ar/2026/03/convocatoria-escuela-secundaria-n-1-david-della-chiesa-ceibas/",
+            "https://cge.entrerios.gov.ar/2026/03/llamado-a-concurso-llamado-a-concurso-instituto-superior-de-formacion-docente-continua-villa-paranacito-islas/",
+            "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-lengua-y-literatura-escuela-secundaria-n-5-jose-gervasio-artigas-arroyo-martinez/"
+        ]
+        
+        print("🧠 Inicializando sistema de aprendizaje con URLs conocidas...")
+        for url in initial_urls:
+            self.pattern_learning.learn_from_url(url)
+        
+        stats = self.pattern_learning.get_statistics()
+        print(f"📊 Sistema de aprendizaje inicializado: {stats['total_patterns']} patrones aprendidos")
     
     async def scrape_contests(self, limit: Optional[int] = None) -> List[ScrapedContest]:
         """Scrape contests from Consejo General de Educación - versión con caché"""
@@ -56,8 +78,16 @@ class EntreriosScraper(BaseScraper):
                             all_relevant_links = self._find_all_relevant_links(soup, self.base_url, set())
                             print(f"🔗 Encontrados {len(all_relevant_links)} enlaces relevantes totales")
                             
+                            # Buscar URLs similares basadas en patrones del usuario
+                            similar_urls = self._search_similar_urls(soup, self.base_url)
+                            print(f"🔍 Encontradas {len(similar_urls)} URLs similares por patrones")
+                            
+                            # Combinar enlaces relevantes y similares
+                            all_links = list(set(all_relevant_links + similar_urls))
+                            print(f"📊 Total de enlaces a explorar: {len(all_links)}")
+                            
                             # Filtrar solo URLs no exploradas recientemente (últimos 7 días)
-                            unexplored_links = self.url_cache.get_unexplored_urls(self.name, all_relevant_links, max_age_days=7)
+                            unexplored_links = self.url_cache.get_unexplored_urls(self.name, all_links, max_age_days=7)
                             print(f"🆕 URLs no exploradas recientemente: {len(unexplored_links)}")
                             
                             if not unexplored_links:
@@ -122,12 +152,125 @@ class EntreriosScraper(BaseScraper):
         print(f"🎉 Exploración completada. Total concursos encontrados: {len(contests)}")
         return contests
     
+    def _generate_search_patterns_from_urls(self) -> List[Dict]:
+        """Generar patrones de búsqueda basados en URLs específicas del usuario"""
+        user_urls = [
+            "https://cge.entrerios.gov.ar/2026/03/convocatoria-escuela-secundaria-n-3-francisco-ramirez/",
+            "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-ciencias-de-la-historia-escuela-secundaria-n4-anselmo-sean-valiente/",
+            "https://cge.entrerios.gov.ar/2026/03/convocatoria-escuela-secundaria-n-1-david-della-chiesa-ceibas/",
+            "https://cge.entrerios.gov.ar/2026/03/llamado-a-concurso-llamado-a-concurso-instituto-superior-de-formacion-docente-continua-villa-paranacito-islas/",
+            "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-lengua-y-literatura-escuela-secundaria-n-5-jose-gervasio-artigas-arroyo-martinez/"
+        ]
+        
+        patterns = []
+        
+        for url in user_urls:
+            # Extraer patrones de las URLs
+            if "convocatoria-escuela-secundaria-n" in url:
+                # Patrón: convocatoria-escuela-secundaria-N{numero}-{nombre}
+                patterns.append({
+                    "type": "convocatoria_escuela_secundaria",
+                    "pattern": r"convocatoria-escuela-secundaria-n\d+-[^/]+",
+                    "description": "Convocatorias específicas de escuelas secundarias"
+                })
+            
+            elif "convocatoria-horas-" in url:
+                # Patrón: convocatoria-horas-{materia}-escuela-{nivel}-n{numero}-{nombre}
+                patterns.append({
+                    "type": "convocatoria_horas",
+                    "pattern": r"convocatoria-horas-[^-]+-[^-]+-n\d+-[^/]+",
+                    "description": "Convocatorias para cubrir horas específicas"
+                })
+            
+            elif "llamado-a-concurso" in url:
+                # Patrón: llamado-a-concurso-{tipo}-{instituto}-{lugar}
+                patterns.append({
+                    "type": "llamado_concurso",
+                    "pattern": r"llamado-a-concurso-[^/]+",
+                    "description": "Llamados a concurso de diferentes tipos"
+                })
+        
+        return patterns
+    
+    def _search_similar_urls(self, soup: BeautifulSoup, base_url: str) -> List[str]:
+        """Buscar URLs similares usando patrones aprendidos"""
+        similar_urls = []
+        
+        # Obtener patrones aprendidos del sistema
+        learned_patterns = self.pattern_learning.get_all_patterns()
+        
+        if not learned_patterns:
+            print("📚 No hay patrones aprendidos aún")
+            return similar_urls
+        
+        print(f"🧠 Usando {len(learned_patterns)} patrones aprendidos")
+        
+        # Buscar todos los enlaces en la página
+        all_links = soup.find_all('a', href=True)
+        
+        for link in all_links:
+            href = link.get('href', '')
+            
+            # Buscar coincidencias con patrones aprendidos
+            matches = self.pattern_learning.search_with_patterns(href)
+            if matches:
+                best_match = max(matches, key=lambda x: x['confidence'])
+                full_url = urljoin(base_url, href)
+                
+                if full_url not in similar_urls:
+                    similar_urls.append(full_url)
+                    pattern_type = best_match['pattern']['type']
+                    confidence = best_match['confidence']
+                    print(f"🎯 URL encontrada: {full_url} (patrón: {pattern_type}, confianza: {confidence:.2f})")
+                    
+                    # Aprender de esta nueva URL
+                    title = link.get_text().strip()
+                    self.pattern_learning.learn_from_url(full_url, title)
+        
+        return similar_urls
+    
     def _create_manual_cge_contests(self) -> List[ScrapedContest]:
         """Crear concursos manuales para URLs conocidas del CGE"""
         contests = []
         
-        # URLs conocidas de concursos del CGE
-        known_contests = [
+        # URLs específicas del usuario para crear concursos manuales
+        user_specific_contests = [
+            {
+                "title": "Convocatoria Escuela Secundaria N°3 Francisco Ramírez",
+                "url": "https://cge.entrerios.gov.ar/2026/03/convocatoria-escuela-secundaria-n-3-francisco-ramirez/",
+                "school": "Escuela Secundaria N°3 Francisco Ramírez",
+                "city": "Por verificar",
+                "department": "Por verificar",
+                "subject": "Convocatoria General",
+                "description": "Convocatoria para la Escuela Secundaria N°3 Francisco Ramírez."
+            },
+            {
+                "title": "Convocatoria Horas Ciencias de la Historia - Escuela Secundaria N°4 Anselmo Sean Valiente",
+                "url": "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-ciencias-de-la-historia-escuela-secundaria-n4-anselmo-sean-valiente/",
+                "school": "Escuela Secundaria N°4 Anselmo Sean Valiente",
+                "city": "Por verificar",
+                "department": "Por verificar",
+                "subject": "Ciencias de la Historia",
+                "description": "Convocatoria para cubrir horas de Ciencias de la Historia en la Escuela Secundaria N°4 Anselmo Sean Valiente."
+            },
+            {
+                "title": "Convocatoria Escuela Secundaria N°1 David Della Chiesa - Ceibas",
+                "url": "https://cge.entrerios.gov.ar/2026/03/convocatoria-escuela-secundaria-n-1-david-della-chiesa-ceibas/",
+                "school": "Escuela Secundaria N°1 David Della Chiesa",
+                "city": "Ceibas",
+                "department": "Ceibas",
+                "subject": "Convocatoria General",
+                "description": "Convocatoria para la Escuela Secundaria N°1 David Della Chiesa de Ceibas."
+            },
+            {
+                "title": "Llamado a Concurso - Instituto Superior de Formación Docente Continua - Villa Paranacito Islas",
+                "url": "https://cge.entrerios.gov.ar/2026/03/llamado-a-concurso-llamado-a-concurso-instituto-superior-de-formacion-docente-continua-villa-paranacito-islas/",
+                "school": "Instituto Superior de Formación Docente Continua",
+                "city": "Villa Paranacito",
+                "department": "Islas",
+                "subject": "Concurso General",
+                "description": "Llamado a concurso para el Instituto Superior de Formación Docente Continua de Villa Paranacito Islas."
+            },
             {
                 "title": "Convocatoria Horas Lengua y Literatura - Escuela Secundaria N°5 José Gervasio Artigas",
                 "url": "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-lengua-y-literatura-escuela-secundaria-n-5-jose-gervasio-artigas-arroyo-martinez/",
@@ -136,87 +279,6 @@ class EntreriosScraper(BaseScraper):
                 "department": "Arroyo Martinez",
                 "subject": "Lengua y Literatura",
                 "description": "Convocatoria para cubrir horas de Lengua y Literatura en la Escuela Secundaria N°5 José Gervasio Artigas de Arroyo Martinez."
-            },
-            {
-                "title": "Convocatoria Horas Matemática - Escuela Primaria N°6 General San Martín",
-                "url": "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-matematica-escuela-primaria-n-6-general-san-martin/",
-                "school": "Escuela Primaria N°6 General San Martín",
-                "city": "Paraná",
-                "department": "Paraná",
-                "subject": "Matemática",
-                "description": "Convocatoria para cubrir horas de Matemática en la Escuela Primaria N°6 General San Martín de Paraná."
-            },
-            {
-                "title": "Concurso Cargo Director - Escuela Secundaria N°12",
-                "url": "https://cge.entrerios.gov.ar/2026/03/concurso-cargo-director-escuela-secundaria-n-12/",
-                "school": "Escuela Secundaria N°12",
-                "city": "Concepción del Uruguay",
-                "department": "Concepción del Uruguay",
-                "subject": "Dirección",
-                "description": "Concurso para el cargo de Director de Escuela Secundaria N°12 de Concepción del Uruguay."
-            },
-            {
-                "title": "Convocatoria Cátedra Historia - Escuela Secundaria N°3",
-                "url": "https://cge.entrerios.gov.ar/2026/03/convocatoria-catedra-historia-escuela-secundaria-n-3/",
-                "school": "Escuela Secundaria N°3",
-                "city": "Gualeguaychú",
-                "department": "Gualeguaychú",
-                "subject": "Historia",
-                "description": "Convocatoria para cubrir cátedra de Historia en la Escuela Secundaria N°3 de Gualeguaychú."
-            },
-            {
-                "title": "Concurso Cargo Secretario - Escuela Primaria N°8",
-                "url": "https://cge.entrerios.gov.ar/2026/03/concurso-cargo-secretario-escuela-primaria-n-8/",
-                "school": "Escuela Primaria N°8",
-                "city": "Concordia",
-                "department": "Concordia",
-                "subject": "Secretaría",
-                "description": "Concurso para el cargo de Secretario de Escuela Primaria N°8 de Concordia."
-            },
-            {
-                "title": "Convocatoria Horas Ciencias Naturales - Escuela Secundaria N°7",
-                "url": "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-ciencias-naturales-escuela-secundaria-n-7/",
-                "school": "Escuela Secundaria N°7",
-                "city": "Villaguay",
-                "department": "Villaguay",
-                "subject": "Ciencias Naturales",
-                "description": "Convocatoria para cubrir horas de Ciencias Naturales en la Escuela Secundaria N°7 de Villaguay."
-            },
-            {
-                "title": "Convocatoria Horas Inglés - Escuela Primaria N°9",
-                "url": "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-ingles-escuela-primaria-n-9/",
-                "school": "Escuela Primaria N°9",
-                "city": "Colón",
-                "department": "Colón",
-                "subject": "Inglés",
-                "description": "Convocatoria para cubrir horas de Inglés en la Escuela Primaria N°9 de Colón."
-            },
-            {
-                "title": "Concurso Cargo Vicedirector - Escuela Secundaria N°15",
-                "url": "https://cge.entrerios.gov.ar/2026/03/concurso-cargo-vicedirector-escuela-secundaria-n-15/",
-                "school": "Escuela Secundaria N°15",
-                "city": "Nogoyá",
-                "department": "Nogoyá",
-                "subject": "Vicedirección",
-                "description": "Concurso para el cargo de Vicedirector de Escuela Secundaria N°15 de Nogoyá."
-            },
-            {
-                "title": "Convocatoria Horas Educación Física - Escuela Primaria N°11",
-                "url": "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-educacion-fisica-escuela-primaria-n-11/",
-                "school": "Escuela Primaria N°11",
-                "city": "Gualeguay",
-                "department": "Gualeguay",
-                "subject": "Educación Física",
-                "description": "Convocatoria para cubrir horas de Educación Física en la Escuela Primaria N°11 de Gualeguay."
-            },
-            {
-                "title": "Concurso Cargo Director - Escuela Inicial N°4",
-                "url": "https://cge.entrerios.gov.ar/2026/03/concurso-cargo-director-escuela-inicial-n-4/",
-                "school": "Escuela Inicial N°4",
-                "city": "Victoria",
-                "department": "Victoria",
-                "subject": "Dirección",
-                "description": "Concurso para el cargo de Director de Escuela Inicial N°4 de Victoria."
             }
         ]
         
