@@ -58,13 +58,19 @@ class FacebookScraper(BaseScraper):
         self.pattern_learning.patterns_data['last_updated'] = datetime.now().isoformat()
         self.pattern_learning._save_patterns()
         
-        # Agregar la URL específica del usuario al aprendizaje
-        specific_url = "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-instalaciones-electromecanicas-e-e-t-n-1-augusto-widmann-villa-paranacito/"
-        self.pattern_learning.learn_from_url(specific_url, "Convocatoria Horas Instalaciones Electromecánicas")
+        # Agregar las URLs específicas del usuario al aprendizaje
+        specific_urls = [
+            "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-formacion-etica-y-ciudadana-escuela-secundaria-n-3-francisco-ramirez/",
+            "https://cge.entrerios.gov.ar/2026/03/convocatoria-escuela-secundaria-n-3-francisco-ramirez/",
+            "https://cge.entrerios.gov.ar/departamental-islas-del-ibicuy/#concursos-nivel-secundario"
+        ]
+        
+        for url in specific_urls:
+            self.pattern_learning.learn_from_url(url, f"Concurso CGE - {url.split('/')[-2]}")
         
         # Agregar URL específica de Facebook del usuario
-        facebook_url = "https://www.facebook.com/share/p/1DzX6tJYZ5/"
-        self.pattern_learning.learn_from_url(facebook_url, "Facebook Share - Concursos")
+        facebook_url = "https://www.facebook.com/ddeislasdelibicuy"
+        self.pattern_learning.learn_from_url(facebook_url, "Facebook DDE Islas del Ibicuy")
         
         stats = self.pattern_learning.get_statistics()
         print(f"📘 Patrones de Facebook inicializados: {stats['total_patterns']} patrones")
@@ -90,10 +96,12 @@ class FacebookScraper(BaseScraper):
             }
             
             async with aiohttp.ClientSession(headers=headers) as session:
-                # URLs específicas conocidas de concursos (como la que mencionaste)
+                # URLs específicas del usuario
                 specific_urls = [
-                    "https://www.facebook.com/share/p/1DzX6tJYZ5/",
                     "https://www.facebook.com/ddeislasdelibicuy",  # Página específica de islas del ibicuy
+                    "https://cge.entrerios.gov.ar/2026/03/convocatoria-horas-formacion-etica-y-ciudadana-escuela-secundaria-n-3-francisco-ramirez/",
+                    "https://cge.entrerios.gov.ar/2026/03/convocatoria-escuela-secundaria-n-3-francisco-ramirez/",
+                    "https://cge.entrerios.gov.ar/departamental-islas-del-ibicuy/#concursos-nivel-secundario",
                     "https://www.facebook.com/cge.entrerios",  # Consejo General de Educación
                     "https://www.facebook.com/educacionentrerios",  # Educación Provincial
                     "https://www.facebook.com/AMETEntreRios",  # AMET Asociación Magisterial
@@ -107,8 +115,6 @@ class FacebookScraper(BaseScraper):
                     "https://www.facebook.com/ddefeliciano",  # DDE Feliciano
                     "https://www.facebook.com/ddevictoria",  # DDE Victoria
                     "https://www.facebook.com/ddegualeguay",  # DDE Gualeguay
-                    "https://www.facebook.com/ddepaysandu",  # DDE Paysandú
-                    "https://www.facebook.com/ddechajarí",  # DDE Chajarí
                     "https://www.facebook.com/ddelapaz",  # DDE La Paz
                     "https://www.facebook.com/ddehasenkamp",  # DDE Hasenkamp
                     "https://www.facebook.com/ddeherrera",  # DDE Herrera
@@ -126,7 +132,6 @@ class FacebookScraper(BaseScraper):
                     "https://www.facebook.com/ddecentro",  # DDE Centro
                     "https://www.facebook.com/ddenorte",  # DDE Norte
                     "https://www.facebook.com/ddeoeste",  # DDE Oeste
-                    # Agregar aquí más URLs específicas si las conoces
                 ]
                 
                 # Intentar procesar URLs específicas manualmente

@@ -4,8 +4,10 @@ from typing import Dict, List
 from app.infrastructure.scrapers.base_scraper import BaseScraper, ScrapedContest
 from app.infrastructure.scrapers.educacion_gob_scraper import EducacionGobScraper
 from app.infrastructure.scrapers.enterios_scraper import EntreriosScraper
+from app.infrastructure.scrapers.enhanced_enterios_scraper import EnhancedEntreriosScraper
+from app.infrastructure.scrapers.simple_cge_scraper import SimpleCGEScraper
+from app.infrastructure.scrapers.datos_abiertos_scraper import DatosAbiertosArgentinaScraper, PuntosDigitalesScraper
 from app.infrastructure.scrapers.facebook_scraper import FacebookScraper
-from app.infrastructure.scrapers.capacitaciones_scraper import AmetCapacitacionesScraper
 
 
 class ScraperFactory:
@@ -16,8 +18,11 @@ class ScraperFactory:
         self.scrapers = {
             "educacion_gob": EducacionGobScraper(),
             "consejo_entrerios": EntreriosScraper(),
+            "cge_enterios_completo": EnhancedEntreriosScraper(),  # Nuevo scraper mejorado
+            "cge_simple": SimpleCGEScraper(),  # Scraper simplificado para pruebas
+            "datos_abiertos_argentina": DatosAbiertosArgentinaScraper(),  # API de datos abiertos
+            "puntos_digitales": PuntosDigitalesScraper(),  # API de capacitaciones digitales
             "facebook": FacebookScraper(),
-            "amet": AmetCapacitacionesScraper(),
         }
     
     def create_scraper(self, source_name: str) -> BaseScraper:

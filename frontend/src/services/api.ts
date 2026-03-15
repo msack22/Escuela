@@ -165,7 +165,10 @@ export const triggerManualScraping = async (source?: string) => {
 
 export const runManualScraping = async (sourceName?: string) => {
   const params = sourceName ? { source_name: sourceName } : {};
-  const response = await api.post('/api/scraping/run', null, { params });
+  const response = await api.post('/api/scraping/run', null, { 
+    params,
+    timeout: 120000 // 2 minutes timeout for scraping operations
+  });
   return response.data;
 };
 

@@ -7,6 +7,7 @@ import ContestList from './pages/ContestList/ContestList.tsx';
 import AlertManagement from './pages/AlertManagement/AlertManagement.tsx';
 import Dashboard from './pages/Dashboard/Dashboard.tsx';
 import ScrapingStatus from './pages/ScrapingStatus/ScrapingStatus.tsx';
+import CapacitacionesPage from './pages/Capacitaciones/CapacitacionesPage.tsx';
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
           <Route path="/contests" element={<ContestList />} />
           <Route path="/alerts" element={<AlertManagement />} />
           <Route path="/scraping" element={<ScrapingStatus />} />
+          <Route path="/capacitaciones" element={<CapacitacionesPage />} />
         </Routes>
       </Container>
     </div>
