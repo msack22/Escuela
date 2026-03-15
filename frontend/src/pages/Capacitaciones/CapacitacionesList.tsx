@@ -33,8 +33,8 @@ import {
   FilterList,
   Refresh,
 } from '@mui/icons-material';
-import { format } from 'date-fns/format';
-import { es } from 'date-fns/locale/es';
+import format from 'date-fns/format';
+import { es } from 'date-fns/locale';
 
 interface Capacitacion {
   id: number;

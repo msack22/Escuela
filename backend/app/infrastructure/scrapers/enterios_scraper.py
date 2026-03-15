@@ -13,7 +13,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('C:/tmp/cge_scraper.log'),
+        logging.FileHandler('/tmp/cge_scraper.log'),
         logging.StreamHandler()
     ]
 )

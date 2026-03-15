@@ -131,6 +131,58 @@ export const deleteAlert = async (id: number) => {
   return response.data;
 };
 
+// User API calls
+export const fetchUsers = async () => {
+  const response = await api.get('/api/users/');
+  return response.data;
+};
+
+export const fetchUserAlerts = async (userId: number) => {
+  const response = await api.get(`/api/users/${userId}/alerts/`);
+  return response.data;
+};
+
+export const fetchUserContestNotifications = async (userId: number) => {
+  const response = await api.get(`/api/users/${userId}/contest-notifications/`);
+  return response.data;
+};
+
+export const createUser = async (userData: any) => {
+  const response = await api.post('/api/users/', userData);
+  return response.data;
+};
+
+export const updateUser = async (id: number, userData: any) => {
+  const response = await api.put(`/api/users/${id}`, userData);
+  return response.data;
+};
+
+export const deleteUser = async (id: number) => {
+  const response = await api.delete(`/api/users/${id}`);
+  return response.data;
+};
+
+// Scheduler Control API calls
+export const getSchedulerStatus = async () => {
+  const response = await api.get('/api/scheduler/status');
+  return response.data;
+};
+
+export const runScrapingOnce = async (data: { source?: string; force?: boolean }) => {
+  const response = await api.post('/api/scheduler/run-once', data);
+  return response.data;
+};
+
+export const getActiveJobs = async () => {
+  const response = await api.get('/api/scheduler/jobs');
+  return response.data;
+};
+
+export const restartScheduler = async () => {
+  const response = await api.post('/api/scheduler/restart');
+  return response.data;
+};
+
 // Notification API calls
 export const sendTestNotification = async (notificationData: any) => {
   const response = await api.post('/api/alerts/test-notification', notificationData);

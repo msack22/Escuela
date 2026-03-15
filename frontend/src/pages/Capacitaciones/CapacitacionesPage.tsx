@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Box, CircularProgress, Alert } from '@mui/material';
-import CapacitacionesList from './CapacitacionesList.tsx';
-import { fetchCapacitaciones, scrapeCapacitaciones } from '../../services/api.ts';
+import CapacitacionesList from './CapacitacionesList';
+import { fetchCapacitaciones, scrapeCapacitaciones } from '../../services/api';
 
 interface Capacitacion {
   id: number;

@@ -50,7 +50,7 @@ import {
   fetchContractTypes,
   fetchCities,
   fetchDepartments,
-} from '../../services/api.ts';
+} from '../../services/api';
 
 const ContestList: React.FC = () => {
   const [filters, setFilters] = useState({
@@ -76,17 +76,23 @@ const ContestList: React.FC = () => {
     isLoading,
     error,
     refetch,
-  } = useQuery(
-    ['contests', filters, pagination],
-    () => fetchContests({ ...filters, ...pagination }),
-    {
-      keepPreviousData: true,
-    }
-  );
+  } = useQuery({
+    queryKey: ['contests', filters, pagination],
+    queryFn: () => fetchContests({ ...filters, ...pagination }),
+  });
 
-  const { data: subjects } = useQuery('subjects', fetchSubjects);
-  const { data: citiesData } = useQuery('cities', fetchCities);
-  const { data: departmentsData } = useQuery('departments', fetchDepartments);
+  const { data: subjects } = useQuery({
+    queryKey: ['subjects'],
+    queryFn: fetchSubjects,
+  });
+  const { data: citiesData } = useQuery({
+    queryKey: ['cities'],
+    queryFn: fetchCities,
+  });
+  const { data: departmentsData } = useQuery({
+    queryKey: ['departments'],
+    queryFn: fetchDepartments,
+  });
 
   const handleFilterChange = (field: string, value: any) => {
     setFilters(prev => ({

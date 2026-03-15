@@ -5,24 +5,17 @@ import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
+import 'antd/dist/reset.css';
 
-import App from './App.tsx';
-import { store } from './store/store.ts';
+import App from './App';
+import { store } from './store/store';
 import './index.css';
 
 // Importar el logger simple (comentado temporalmente)
 // import './utils/simpleLogger.js';
 
-// Create a client for TanStack Query
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      refetchOnWindowFocus: false,
-      retry: 1,
-      staleTime: 5 * 60 * 1000, // 5 minutes
-    },
-  },
-});
+// Create a client for TanStack Query v5 - minimal configuration
+const queryClient = new QueryClient();
 
 // Create Material-UI theme
 const theme = createTheme({

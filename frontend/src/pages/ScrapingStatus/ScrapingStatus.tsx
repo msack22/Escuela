@@ -32,7 +32,7 @@ import {
   Settings as SettingsIcon,
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns/format';
+import { format } from 'date-fns';
 
 import {
   fetchScrapingStatus,
@@ -42,7 +42,7 @@ import {
   startScheduler,
   stopScheduler,
   fetchScrapingLogs,
-} from '../../services/api.ts';
+} from '../../services/api';
 
 const ScrapingStatus: React.FC = () => {
   const [selectedSource, setSelectedSource] = useState('');
@@ -51,31 +51,33 @@ const ScrapingStatus: React.FC = () => {
 
   const queryClient = useQueryClient();
 
-  const { data: status, isLoading: statusLoading } = useQuery(
-    'scrapingStatus',
-    fetchScrapingStatus,
-    { refetchInterval: 30000 } // Refetch every 30 seconds
-  );
-
-  const { data: logsData, isLoading: logsLoading } = useQuery(
-    'scrapingLogs',
-    () => fetchScrapingLogs(50),
-    { refetchInterval: 60000 } // Refetch every minute
-  );
-
-  const manualScrapingMutation = useMutation(runManualScraping, {
-    onSuccess: (data) => {
-      queryClient.invalidateQueries('scrapingLogs');
-      alert(`Scraping completado: ${data.total_contests_found} concursos encontrados`);
-    },
-    onError: (error: any) => {
-      alert(error.response?.data?.detail || 'Error al ejecutar scraping manual');
-    },
+  const { data: status, isPending: statusLoading } = useQuery({
+    queryKey: ['scrapingStatus'],
+    queryFn: fetchScrapingStatus,
+    refetchInterval: 30000 // Refetch every 30 seconds
   });
 
-  const startSchedulerMutation = useMutation(startScheduler, {
+  const { data: logsData, isLoading: logsLoading } = useQuery({
+    queryKey: ['scrapingLogs'],
+    queryFn: () => fetchScrapingLogs(50),
+    refetchInterval: 60000 // Refetch every minute
+  });
+
+  const manualScrapingMutation = useMutation({
+    mutationFn: runManualScraping,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['scrapingLogs'] });
+      alert(`Scraping completado: ${data.total_contests_found} concursos encontrados`);
+    },
+    onError: (error) => {
+      alert(`Error en scraping: ${error}`);
+    }
+  });
+
+  const startSchedulerMutation = useMutation({
+    mutationFn: startScheduler,
     onSuccess: () => {
-      queryClient.invalidateQueries('scrapingStatus');
+      queryClient.invalidateQueries({ queryKey: ['scrapingStatus'] });
       alert('Scheduler iniciado correctamente');
     },
     onError: (error: any) => {
@@ -83,9 +85,10 @@ const ScrapingStatus: React.FC = () => {
     },
   });
 
-  const stopSchedulerMutation = useMutation(stopScheduler, {
+  const stopSchedulerMutation = useMutation({
+    mutationFn: stopScheduler,
     onSuccess: () => {
-      queryClient.invalidateQueries('scrapingStatus');
+      queryClient.invalidateQueries({ queryKey: ['scrapingStatus'] });
       alert('Scheduler detenido correctamente');
     },
     onError: (error: any) => {
@@ -159,7 +162,7 @@ const ScrapingStatus: React.FC = () => {
                   color="success"
                   startIcon={<PlayIcon />}
                   onClick={handleStartScheduler}
-                  disabled={status?.is_running || startSchedulerMutation.isLoading}
+                  disabled={status?.is_running || startSchedulerMutation.isPending}
                   size="small"
                 >
                   Iniciar
@@ -169,7 +172,7 @@ const ScrapingStatus: React.FC = () => {
                   color="error"
                   startIcon={<StopIcon />}
                   onClick={handleStopScheduler}
-                  disabled={!status?.is_running || stopSchedulerMutation.isLoading}
+                  disabled={!status?.is_running || stopSchedulerMutation.isPending}
                   size="small"
                 >
                   Detener
@@ -206,10 +209,10 @@ const ScrapingStatus: React.FC = () => {
                 variant="contained"
                 startIcon={<RefreshIcon />}
                 onClick={handleManualScraping}
-                disabled={manualScrapingMutation.isLoading}
+                disabled={manualScrapingMutation.isPending}
                 fullWidth
               >
-                {manualScrapingMutation.isLoading ? (
+                {manualScrapingMutation.isPending ? (
                   <CircularProgress size={20} />
                 ) : (
                   'Ejecutar Scraping'

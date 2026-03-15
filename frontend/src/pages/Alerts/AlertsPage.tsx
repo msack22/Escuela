@@ -39,7 +39,7 @@ import {
   Email as EmailIcon,
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns/format';
+import format from 'date-fns';
 
 // API functions (placeholder - deberían estar en api.ts)
 const fetchUsers = async () => {

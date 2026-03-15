@@ -15,15 +15,12 @@ import {
   NotificationsActive as NotificationIcon,
   TrendingUp as TrendingIcon,
 } from '@mui/icons-material';
-import { useQuery } from 'react-query';
+import { useQuery } from '@tanstack/react-query';
 
 import {
-  fetchContests,
-  fetchAlerts,
-  fetchScrapingStatus,
   fetchContestStatistics,
   fetchSystemStatus,
-} from '../../services/api.ts';
+} from '../../services/api';
 
 interface StatCardProps {
   title: string;
@@ -59,7 +56,9 @@ const Dashboard: React.FC = () => {
     data: statistics,
     isLoading: statsLoading,
     error: statsError,
-  } = useQuery('contestStatistics', fetchContestStatistics, {
+  } = useQuery({
+    queryKey: ['contestStatistics'],
+    queryFn: fetchContestStatistics,
     refetchInterval: 60000, // Refetch every minute
   });
 
@@ -67,7 +66,9 @@ const Dashboard: React.FC = () => {
     data: systemStatus,
     isLoading: statusLoading,
     error: statusError,
-  } = useQuery('systemStatus', fetchSystemStatus, {
+  } = useQuery({
+    queryKey: ['systemStatus'],
+    queryFn: fetchSystemStatus,
     refetchInterval: 30000, // Refetch every 30 seconds
   });
 

@@ -22,10 +22,17 @@ class ContestRepository(BaseRepository):
         return contest
     
     def get_by_id(self, contest_id: int) -> Optional[Contest]:
-        return self.db.query(Contest).join(School).join(Subject).filter(Contest.id == contest_id).first()
+        contest = self.db.query(Contest).join(School).join(Subject).filter(Contest.id == contest_id).first()
+        if contest:
+            self.db.refresh(contest)
+        return contest
     
     def get_all(self, skip: int = 0, limit: int = 100) -> List[Contest]:
-        return self.db.query(Contest).join(School).join(Subject).offset(skip).limit(limit).all()
+        contests = self.db.query(Contest).join(School).join(Subject).order_by(Contest.id.desc()).offset(skip).limit(limit).all()
+        # Refresh each contest to ensure all fields are loaded
+        for contest in contests:
+            self.db.refresh(contest)
+        return contests
     
     def get_active_contests(self) -> List[Contest]:
         return self.db.query(Contest).join(School).join(Subject).filter(Contest.is_active == True).all()

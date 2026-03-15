@@ -16,6 +16,8 @@ import {
   Notifications as NotificationsIcon,
   Settings as SettingsIcon,
   School as SchoolIcon,
+  Person as PersonIcon,
+  Schedule as ScheduleIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 
@@ -37,6 +39,8 @@ const Navbar: React.FC = () => {
     { label: 'Concursos', icon: <ListIcon />, path: '/contests' },
     { label: 'Capacitaciones', icon: <SchoolIcon />, path: '/capacitaciones' },
     { label: 'Alertas', icon: <NotificationsIcon />, path: '/alerts' },
+    { label: 'Usuarios', icon: <PersonIcon />, path: '/users' },
+    { label: 'Scheduler', icon: <ScheduleIcon />, path: '/scheduler' },
     { label: 'Scraping', icon: <SettingsIcon />, path: '/scraping' },
   ];
 

@@ -31,7 +31,7 @@ import {
   NotificationsActive as NotificationIcon,
   Send as SendIcon,
 } from '@mui/icons-material';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import {
   fetchAlerts,
@@ -40,7 +40,7 @@ import {
   deleteAlert,
   sendTestNotification,
   fetchSubjects,
-} from '../../services/api.ts';
+} from '../../services/api';
 
 const AlertManagement: React.FC = () => {
   const [openDialog, setOpenDialog] = useState(false);
@@ -56,35 +56,42 @@ const AlertManagement: React.FC = () => {
 
   const queryClient = useQueryClient();
 
-  const { data: alerts, isLoading } = useQuery('alerts', fetchAlerts);
-  const { data: subjects } = useQuery('subjects', fetchSubjects);
+  const { data: alerts, isPending } = useQuery({
+    queryKey: ['alerts'],
+    queryFn: fetchAlerts,
+  });
+  const { data: subjects } = useQuery({
+    queryKey: ['subjects'],
+    queryFn: fetchSubjects,
+  });
 
-  const createMutation = useMutation(createAlert, {
+  const createMutation = useMutation({
+    mutationFn: createAlert,
     onSuccess: () => {
-      queryClient.invalidateQueries('alerts');
+      queryClient.invalidateQueries({ queryKey: ['alerts'] });
       setOpenDialog(false);
       resetForm();
     },
   });
 
-  const updateMutation = useMutation(
-    ({ id, data }: { id: number; data: any }) => updateAlert(id, data),
-    {
-      onSuccess: () => {
-        queryClient.invalidateQueries('alerts');
-        setOpenDialog(false);
-        resetForm();
-      },
-    }
-  );
-
-  const deleteMutation = useMutation(deleteAlert, {
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: any }) => updateAlert(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries('alerts');
+      queryClient.invalidateQueries({ queryKey: ['alerts'] });
+      setOpenDialog(false);
+      resetForm();
     },
   });
 
-  const testNotificationMutation = useMutation(sendTestNotification, {
+  const deleteMutation = useMutation({
+    mutationFn: deleteAlert,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alerts'] });
+    },
+  });
+
+  const testNotificationMutation = useMutation({
+    mutationFn: sendTestNotification,
     onSuccess: (data) => {
       alert(data.message || 'Notificación de prueba enviada');
       setTestNotificationOpen(false);
@@ -268,9 +275,9 @@ const AlertManagement: React.FC = () => {
           <Button
             onClick={handleSubmit}
             variant="contained"
-            disabled={createMutation.isLoading || updateMutation.isLoading}
+            disabled={createMutation.isPending || updateMutation.isPending}
           >
-            {createMutation.isLoading || updateMutation.isLoading ? (
+            {createMutation.isPending || updateMutation.isPending ? (
               <CircularProgress size={20} />
             ) : (
               'Guardar'
@@ -298,9 +305,9 @@ const AlertManagement: React.FC = () => {
             onClick={handleSendTestNotification}
             variant="contained"
             startIcon={<SendIcon />}
-            disabled={testNotificationMutation.isLoading}
+            disabled={testNotificationMutation.isPending}
           >
-            {testNotificationMutation.isLoading ? (
+            {testNotificationMutation.isPending ? (
               <CircularProgress size={20} />
             ) : (
               'Enviar Prueba'

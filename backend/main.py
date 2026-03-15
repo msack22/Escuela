@@ -7,7 +7,7 @@ from datetime import datetime
 import logging
 
 from app.core.database import engine, SessionLocal, get_db
-from app.api.routes import contests, alerts, scraping, schools, subjects, logs, capacitaciones, diplomas, diploma_scraping, scraping_modern, scraping_async, resolutions
+from app.api.routes import contests, alerts, scraping, schools, subjects, logs, capacitaciones, diplomas, diploma_scraping, scraping_modern, scraping_async, resolutions, users
 from app.infrastructure.scrapers.scraper_factory import ScrapingService
 from app.application.services.scheduler_service import ScrapingScheduler
 
@@ -42,6 +42,7 @@ app.add_middleware(
 # Include API routers
 app.include_router(contests.router, prefix="/api/contests", tags=["contests"])
 app.include_router(alerts.router, prefix="/api/alerts", tags=["alerts"])
+app.include_router(users.router, prefix="/api/users", tags=["users"])
 app.include_router(scraping.router, prefix="/api/scraping", tags=["scraping"])
 app.include_router(scraping_modern.router, tags=["scraping-modern"])
 app.include_router(scraping_async.router, tags=["scraping-async"])
@@ -59,15 +60,15 @@ async def startup_event():
     """Initialize services on application startup"""
     logger.info("Starting Sistema de Concursos Educativos API...")
     
-    # Initialize scraping service
-    scraping_service = ScrapingService()
+    # Initialize scraping service (sin inicializar para evitar lentitud)
+    # scraping_service = ScrapingService()
     # await scraping_service.initialize()  # Comentado temporalmente
     
-    # Start scheduler
+    # Start scheduler (completamente desactivado para evitar lentitud)
     # scheduler = ScrapingScheduler()
     # await scheduler.start()  # Comentado temporalmente
     
-    logger.info("Application started successfully")
+    logger.info("Application started successfully - Scheduler disabled")
 
 
 @app.on_event("shutdown")
@@ -75,11 +76,11 @@ async def shutdown_event():
     """Cleanup on application shutdown"""
     logger.info("Shutting down Sistema de Concursos Educativos API...")
     
-    # Stop scheduler
-    scheduler = ScrapingScheduler()
-    await scheduler.stop()
+    # Stop scheduler (completamente desactivado)
+    # scheduler = ScrapingScheduler()
+    # await scheduler.stop()  # Comentado temporalmente
     
-    logger.info("Application shutdown complete")
+    logger.info("Application shutdown complete - Scheduler disabled")
 
 
 @app.get("/")
@@ -114,16 +115,16 @@ async def system_status():
 async def status():
     """Get system status"""
     try:
-        scraping_service = ScrapingService()
-        scheduler = ScrapingScheduler()
+        # scraping_service = ScrapingService()  # Comentado para evitar inicialización
+        # scheduler = ScrapingScheduler()  # Comentado para evitar inicialización
         
         return {
             "status": "running",
             "scraping": {
-                "is_running": scheduler.is_running(),
-                "last_run": scheduler.get_last_run_time(),
-                "next_run": scheduler.get_next_run_time(),
-                "available_sources": scraping_service.get_available_sources()
+                "is_running": False,  # Scheduler desactivado
+                "last_run": None,
+                "next_run": None,
+                "available_sources": []  # Temporalmente vacío
             },
             "database": "connected",
             "timestamp": datetime.utcnow().isoformat()
@@ -145,12 +146,16 @@ async def health_check():
 @app.get("/api/status")
 async def get_system_status():
     """Get system status including scheduler"""
-    from app.application.services.scheduler_service import get_scheduler
+    # from app.application.services.scheduler_service import get_scheduler  # Comentado para evitar inicialización
     
-    scheduler = get_scheduler()
+    # scheduler = get_scheduler()  # Comentado para evitar inicialización
     return {
         "api_status": "running",
-        "scheduler": scheduler.get_scheduler_status(),
+        "scheduler": {
+            "is_running": False,
+            "last_run": None,
+            "next_run": None
+        },
         "database": "connected"
     }
 

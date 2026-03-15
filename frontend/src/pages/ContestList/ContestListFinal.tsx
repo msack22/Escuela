@@ -1,5 +1,143 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { fetchContests, fetchCities, fetchDepartments } from '../services/api';
+import { fetchContests, fetchCities, fetchDepartments } from '../../services/api';
+
+// Componente de checkboxes para múltiples materias
+const SubjectCheckboxGroup = ({ selectedSubjects, onChange, options }: {
+  selectedSubjects: string[];
+  onChange: (subjects: string[]) => void;
+  options: Array<{ value: string; label: string; description?: string }>;
+}) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  const filteredOptions = useMemo(() => {
+    if (!searchTerm) return options;
+    return options.filter(option =>
+      option.label.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      option.description?.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [options, searchTerm]);
+
+  const handleSubjectToggle = (subjectValue: string) => {
+    const newSelection = selectedSubjects.includes(subjectValue)
+      ? selectedSubjects.filter(s => s !== subjectValue)
+      : [...selectedSubjects, subjectValue];
+    onChange(newSelection);
+  };
+
+  const handleSelectAll = () => {
+    if (selectedSubjects.length === filteredOptions.length) {
+      onChange([]);
+    } else {
+      onChange(filteredOptions.map(option => option.value));
+    }
+  };
+
+  return (
+    <div className="border border-gray-300 rounded-lg p-4 bg-white">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-lg font-semibold text-gray-800">
+          📚 Materias ({selectedSubjects.length} seleccionadas)
+        </h3>
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+        >
+          {isExpanded ? '▼ Ocultar' : '▶ Mostrar'} todas
+        </button>
+      </div>
+
+      {/* Búsqueda de materias */}
+      <div className="relative mb-3">
+        <input
+          type="text"
+          placeholder="🔍 Buscar materias..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        />
+        {searchTerm && (
+          <button
+            onClick={() => setSearchTerm('')}
+            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          >
+            ❌
+          </button>
+        )}
+      </div>
+
+      {/* Botón de seleccionar todas */}
+      <div className="flex items-center justify-between mb-3 p-2 bg-gray-50 rounded">
+        <label className="flex items-center cursor-pointer">
+          <input
+            type="checkbox"
+            checked={selectedSubjects.length === filteredOptions.length && filteredOptions.length > 0}
+            onChange={handleSelectAll}
+            className="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm font-medium text-gray-700">
+            {selectedSubjects.length === filteredOptions.length ? 'Deseleccionar todas' : 'Seleccionar todas'}
+          </span>
+        </label>
+        <span className="text-xs text-gray-500">
+          {filteredOptions.length} materias disponibles
+        </span>
+      </div>
+
+      {/* Lista de checkboxes */}
+      <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 ${isExpanded ? 'max-h-96 overflow-y-auto' : 'max-h-48 overflow-y-auto'}`}>
+        {filteredOptions.map((option) => (
+          <label
+            key={option.value}
+            className="flex items-start p-2 border border-gray-200 rounded hover:bg-gray-50 cursor-pointer transition-colors"
+          >
+            <input
+              type="checkbox"
+              checked={selectedSubjects.includes(option.value)}
+              onChange={() => handleSubjectToggle(option.value)}
+              className="mt-1 mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <div className="flex-1">
+              <div className="font-medium text-gray-800 text-sm">
+                {option.label}
+              </div>
+              {option.description && (
+                <div className="text-xs text-gray-500 mt-1">
+                  {option.description}
+                </div>
+              )}
+            </div>
+          </label>
+        ))}
+      </div>
+
+      {/* Materias seleccionadas */}
+      {selectedSubjects.length > 0 && (
+        <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+          <h4 className="text-sm font-semibold text-blue-800 mb-2">
+            ✅ Materias seleccionadas:
+          </h4>
+          <div className="flex flex-wrap gap-2">
+            {selectedSubjects.map((subject) => (
+              <span
+                key={subject}
+                className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+              >
+                {subject}
+                <button
+                  onClick={() => handleSubjectToggle(subject)}
+                  className="ml-1 hover:text-blue-600"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // Interfaces
 interface Contest {
@@ -311,12 +449,49 @@ const SimpleTable = ({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      window.open(row.source_url, '_blank');
+                      const url = row.source_url;
+                      if (url && url.trim() !== '') {
+                        window.open(url, '_blank');
+                      } else {
+                        // Mostrar información del concurso cuando no hay URL
+                        const info = `📋 INFORMACIÓN DEL CONCURSO
+
+🏆 TÍTULO:
+${row.title || 'Sin título'}
+
+🏫 ESCUELA:
+${row.school_name || 'Sin escuela'}
+
+📍 UBICACIÓN:
+${row.school_city || 'Sin ciudad'}, ${row.school_department || 'Sin departamento'}
+
+📚 MATERIA:
+${row.subject_name || 'Sin materia'}
+
+📅 FECHA:
+${row.date || 'Sin fecha'}
+
+⏰ LÍMITE INSCRIPCIÓN:
+${row.registration_deadline || 'Sin fecha límite'}
+
+🔗 FUENTE:
+${row.source_url || 'No disponible'}
+
+ℹ️ ESTADO:
+${row.is_active ? '✅ Activo' : '❌ Inactivo'}
+
+                        `.trim();
+                        alert(info);
+                      }
                     }}
-                    className="p-2 rounded-lg text-blue-600 hover:bg-blue-50"
-                    title="Ver detalles"
+                    className={`p-2 rounded-lg ${
+                      row.source_url && row.source_url.trim() !== '' 
+                        ? 'text-blue-600 hover:bg-blue-50' 
+                        : 'text-orange-600 hover:bg-orange-50'
+                    }`}
+                    title={row.source_url && row.source_url.trim() !== '' ? "Ver detalles" : "Ver información del concurso"}
                   >
-                    👁️
+                    {row.source_url && row.source_url.trim() !== '' ? '🔗' : '📋'}
                   </button>
                   <button
                     onClick={(e) => {
@@ -362,6 +537,7 @@ const ContestListImproved: React.FC = () => {
   const [selectedCity, setSelectedCity] = React.useState('');
   const [selectedDepartment, setSelectedDepartment] = React.useState('');
   const [selectedSubject, setSelectedSubject] = React.useState('');
+  const [selectedSubjects, setSelectedSubjects] = React.useState<string[]>([]); // Nueva: múltiples materias
   
   // Estados de paginación
   const [currentPage, setCurrentPage] = React.useState(1);
@@ -525,7 +701,7 @@ const ContestListImproved: React.FC = () => {
   const filteredContests = contests.filter(contest => {
     if (selectedCity && contest.school_city !== selectedCity) return false;
     if (selectedDepartment && contest.school_department !== selectedDepartment) return false;
-    if (selectedSubject && contest.subject_name !== selectedSubject) return false;
+    if (selectedSubjects.length > 0 && !selectedSubjects.includes(contest.subject_name)) return false;
     return true;
   });
 
@@ -541,7 +717,7 @@ const ContestListImproved: React.FC = () => {
       {/* Filtros superiores */}
       <div className="bg-white p-6 rounded-lg shadow">
         <h2 className="text-lg font-semibold mb-4">Filtros de Búsqueda Mejorados</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Ciudad
@@ -566,30 +742,32 @@ const ContestListImproved: React.FC = () => {
             />
           </div>
           
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Materia
-            </label>
-            <SearchableDropdown
-              value={selectedSubject}
-              onChange={setSelectedSubject}
+          <div className="lg:col-span-2">
+            <SubjectCheckboxGroup
+              selectedSubjects={selectedSubjects}
+              onChange={setSelectedSubjects}
               options={subjectOptions}
-              placeholder="Seleccionar materia"
             />
           </div>
-          
-          <div className="flex items-end">
-            <button
-              onClick={() => {
-                setSelectedCity('');
-                setSelectedDepartment('');
-                setSelectedSubject('');
-              }}
-              className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
-            >
-              Limpiar Filtros
-            </button>
+        </div>
+        
+        {/* Botones de acción */}
+        <div className="flex justify-between items-center mt-4">
+          <div className="text-sm text-gray-600">
+            {selectedSubjects.length > 0 && (
+              <span>📚 {selectedSubjects.length} materia(s) seleccionada(s)</span>
+            )}
           </div>
+          <button
+            onClick={() => {
+              setSelectedCity('');
+              setSelectedDepartment('');
+              setSelectedSubjects([]);
+            }}
+            className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
+          >
+            🧹 Limpiar Filtros
+          </button>
         </div>
       </div>
 
