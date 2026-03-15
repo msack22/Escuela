@@ -12,16 +12,14 @@ router = APIRouter()
 
 class AlertCreate(BaseModel):
     user_name: str
-    whatsapp_number: str
     email_address: Optional[str] = None
     subject_preferences: List[str]
     max_distance_km: int = 50
-    notification_channels: str = "both"  # "whatsapp", "email", "both"
+    notification_channels: str = "both"  # "email", "browser", "both"
 
 
 class AlertUpdate(BaseModel):
     user_name: Optional[str] = None
-    whatsapp_number: Optional[str] = None
     email_address: Optional[str] = None
     subject_preferences: Optional[List[str]] = None
     max_distance_km: Optional[int] = None
@@ -29,9 +27,8 @@ class AlertUpdate(BaseModel):
 
 
 class TestNotificationRequest(BaseModel):
-    whatsapp_number: Optional[str] = None
     email_address: Optional[str] = None
-    channels: List[str] = ["both"]  # ["whatsapp", "email", "both"]
+    channels: List[str] = ["both"]  # ["email", "browser", "both"]
 
 
 @router.post("/", response_model=dict)
@@ -42,7 +39,7 @@ async def create_alert(alert: AlertCreate, db: Session = Depends(get_db)):
     try:
         new_alert = service.create_alert(
             user_name=alert.user_name,
-            whatsapp_number=alert.whatsapp_number,
+            email_address=alert.email_address,
             subject_preferences=alert.subject_preferences,
             max_distance_km=alert.max_distance_km
         )
@@ -50,7 +47,7 @@ async def create_alert(alert: AlertCreate, db: Session = Depends(get_db)):
         return {
             "id": new_alert.id,
             "user_name": new_alert.user_name,
-            "whatsapp_number": new_alert.whatsapp_number,
+            "email_address": new_alert.email_address,
             "subject_preferences": new_alert.subject_preferences,
             "max_distance_km": new_alert.max_distance_km,
             "is_active": new_alert.is_active,

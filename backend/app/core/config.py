@@ -4,16 +4,13 @@ from typing import Optional
 
 class Settings(BaseSettings):
     # Database
-    database_url: str = "mysql+pymysql://root:tu_password@localhost/concursos_db"
+    database_url: str = "mysql+pymysql://root:tu_password@localhost:3306/concursos_db"
     
-    # Redis
-    redis_url: str = "redis://localhost:6379"
+    # Redis (opcional para desarrollo)
+    redis_url: str = "redis://localhost:6379/0"
     
     # API Keys
     google_maps_api_key: Optional[str] = None
-    twilio_account_sid: Optional[str] = None
-    twilio_auth_token: Optional[str] = None
-    twilio_whatsapp_number: Optional[str] = None
     sendgrid_api_key: Optional[str] = None
     sender_email: Optional[str] = None
     brevo_api_key: Optional[str] = None

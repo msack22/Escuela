@@ -107,6 +107,7 @@ class Contest(Base):
     description = Column(Text)
     date = Column(DateTime(timezone=True), nullable=False, index=True)
     registration_deadline = Column(DateTime(timezone=True))
+    publication_date = Column(DateTime(timezone=True), nullable=True, index=True)  # Fecha de publicación original
     
     # Additional contest details
     level = Column(String(50), nullable=True, index=True)  # primaria, secundaria, inicial, etc.

@@ -1,22 +1,21 @@
 """
-Sistema de notificaciones múltiples (WhatsApp, Email, o ambos)
+Sistema de notificaciones múltiples (Email únicamente)
 """
 
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional
 from enum import Enum
 import asyncio
 import logging
 from datetime import datetime
 from dataclasses import dataclass
 
-from app.infrastructure.notifications.whatsapp_secure_notifier import WhatsAppSecureNotifier
 from app.infrastructure.notifications.email_notifier import EmailNotifier, EmailMessage
 from app.infrastructure.notifications.base_notifier import BaseNotifier, NotificationMessage
 
 class NotificationChannel(Enum):
     """Canales de notificación disponibles"""
-    WHATSAPP = "whatsapp"
     EMAIL = "email"
+    BROWSER = "browser"  # Notificaciones en navegador
     BOTH = "both"
 
 @dataclass
@@ -36,7 +35,6 @@ class NotificationResult:
 @dataclass
 class MultiNotificationRequest:
     """Solicitud de notificación múltiple"""
-    recipient_whatsapp: Optional[str] = None
     recipient_email: Optional[str] = None
     channels: List[NotificationChannel] = None
     message: str = ""
@@ -51,50 +49,25 @@ class MultiNotifier:
     """Sistema de notificaciones múltiples"""
     
     def __init__(self):
-        # Crear una implementación concreta para WhatsApp
-        from app.infrastructure.notifications.whatsapp_secure_notifier import WhatsAppSecureNotifier
-        from app.infrastructure.notifications.base_notifier import BaseNotifier, NotificationMessage
-        
-        class ConcreteWhatsAppNotifier(BaseNotifier):
-            def __init__(self):
-                super().__init__()
-                self.use_official_api = True
-                self.enable_sandbox = False
-            
-            def is_available(self) -> bool:
-                return True
-            
-            def is_secure(self) -> bool:
-                return True
-            
-            def is_configured(self) -> bool:
-                return True
-            
-            async def send_notification(self, message: NotificationMessage) -> bool:
-                print(f"WhatsApp notification sent to {message.recipient}: {message.message}")
-                return True
-        
-        self.whatsapp_notifier = ConcreteWhatsAppNotifier()
         self.email_notifier = EmailNotifier()
         self.logger = logging.getLogger(__name__)
     
     def is_available(self, channel: NotificationChannel) -> bool:
         """Verificar disponibilidad de un canal"""
-        if channel == NotificationChannel.WHATSAPP:
-            return self.whatsapp_notifier.is_available()
-        elif channel == NotificationChannel.EMAIL:
+        if channel == NotificationChannel.EMAIL:
             return self.email_notifier.is_available()
+        elif channel == NotificationChannel.BROWSER:
+            return True  # Browser notifications always available
         elif channel == NotificationChannel.BOTH:
-            return self.whatsapp_notifier.is_available() and self.email_notifier.is_available()
+            return self.email_notifier.is_available()
         return False
     
     def get_available_channels(self) -> List[NotificationChannel]:
         """Obtener canales disponibles"""
         available = []
-        if self.whatsapp_notifier.is_available():
-            available.append(NotificationChannel.WHATSAPP)
         if self.email_notifier.is_available():
             available.append(NotificationChannel.EMAIL)
+        available.append(NotificationChannel.BROWSER)  # Always available
         
         if len(available) == 2:
             available.append(NotificationChannel.BOTH)
@@ -109,10 +82,9 @@ class MultiNotifier:
         channels_to_use = []
         for channel in request.channels:
             if channel == NotificationChannel.BOTH:
-                if request.recipient_whatsapp:
-                    channels_to_use.append(NotificationChannel.WHATSAPP)
                 if request.recipient_email:
                     channels_to_use.append(NotificationChannel.EMAIL)
+                channels_to_use.append(NotificationChannel.BROWSER)
             else:
                 channels_to_use.append(channel)
         
@@ -131,10 +103,10 @@ class MultiNotifier:
     async def _send_channel_notification(self, channel: NotificationChannel, request: MultiNotificationRequest) -> NotificationResult:
         """Enviar notificación por un canal específico"""
         try:
-            if channel == NotificationChannel.WHATSAPP:
-                return await self._send_whatsapp_notification(request)
-            elif channel == NotificationChannel.EMAIL:
+            if channel == NotificationChannel.EMAIL:
                 return await self._send_email_notification(request)
+            elif channel == NotificationChannel.BROWSER:
+                return await self._send_browser_notification(request)
             else:
                 return NotificationResult(
                     success=False,
@@ -148,52 +120,7 @@ class MultiNotifier:
             return NotificationResult(
                 success=False,
                 channel=channel,
-                recipient=request.recipient_whatsapp or request.recipient_email or "",
-                message=request.message,
-                error=str(e)
-            )
-    
-    async def _send_whatsapp_notification(self, request: MultiNotificationRequest) -> NotificationResult:
-        """Enviar notificación por WhatsApp"""
-        if not request.recipient_whatsapp:
-            return NotificationResult(
-                success=False,
-                channel=NotificationChannel.WHATSAPP,
-                recipient="",
-                message=request.message,
-                error="No se especificó número de WhatsApp"
-            )
-        
-        try:
-            # Formatear mensaje para WhatsApp
-            if request.contest_data:
-                message = self._format_whatsapp_message(request.contest_data)
-            else:
-                message = request.message
-            
-            # Crear mensaje de notificación
-            notification = NotificationMessage(
-                recipient=request.recipient_whatsapp,
-                message=message,
-                priority="high"
-            )
-            
-            # Enviar
-            success = await self.whatsapp_notifier.send_notification(notification)
-            
-            return NotificationResult(
-                success=success,
-                channel=NotificationChannel.WHATSAPP,
-                recipient=request.recipient_whatsapp,
-                message=message,
-                error=None if success else "Error al enviar WhatsApp"
-            )
-            
-        except Exception as e:
-            return NotificationResult(
-                success=False,
-                channel=NotificationChannel.WHATSAPP,
-                recipient=request.recipient_whatsapp,
+                recipient=request.recipient_email or "",
                 message=request.message,
                 error=str(e)
             )
@@ -241,85 +168,17 @@ class MultiNotifier:
                 error=str(e)
             )
     
-    def _format_whatsapp_message(self, contest_data: Dict[str, Any]) -> str:
-        """Formatear mensaje para WhatsApp"""
-        message = f"""🎓 *NUEVO CONCURSO EDUCATIVO*
-
-📋 *Título:* {contest_data.get('title', 'Sin título')}
-
-🏫 *Escuela:* {contest_data.get('school_name', 'No especificada')}
-📍 *Ciudad:* {contest_data.get('school_city', 'No especificada')}
-📍 *Departamento:* {contest_data.get('school_department', 'No especificado')}
-
-📚 *Materia:* {contest_data.get('subject_name', 'No especificada')}
-📖 *Nivel:* {contest_data.get('level', 'No especificado')}
-🕐 *Turno:* {contest_data.get('shift', 'No especificado')}
-⏱️ *Horario:* {contest_data.get('schedule', 'No especificado')}
-📊 *Horas:* {contest_data.get('hours_to_cover', 'No especificado')}
-📄 *Contrato:* {contest_data.get('contract_type', 'No especificado')}
-
-📅 *Fecha:* {contest_data.get('date', 'No especificada')}
-⏰ *Límite:* {contest_data.get('registration_deadline', 'No especificada')}
-
-📝 *Descripción:* {contest_data.get('description', 'Sin descripción')[:200]}...
-
-🔗 *Fuente:* {contest_data.get('source_name', 'No especificada')}
-🌐 *Link:* {contest_data.get('source_url', 'No disponible')}
-
----
-*Sistema de Concursos Educativos*"""
-        
-        return message
-    
-    async def send_test_notification(self, recipient_whatsapp: str = None, recipient_email: str = None, channels: List[NotificationChannel] = None) -> List[NotificationResult]:
-        """Enviar notificación de prueba"""
-        if channels is None:
-            channels = [NotificationChannel.BOTH]
-        
-        test_contest_data = {
-            'title': 'Concurso de Prueba - Matemática',
-            'school_name': 'Escuela Secundaria N° 1',
-            'school_city': 'Paraná',
-            'school_department': 'Paraná',
-            'subject_name': 'Matemática',
-            'date': datetime.now().strftime('%Y-%m-%d'),
-            'registration_deadline': (datetime.now().replace(day=datetime.now().day + 7)).strftime('%Y-%m-%d'),
-            'level': 'Secundario',
-            'shift': 'Mañana',
-            'schedule': '08:00-12:00',
-            'hours_to_cover': 20,
-            'contract_type': 'Temporario',
-            'description': 'Se busca profesor de matemática para cubrir cargo temporario. Requisitos: título docente, experiencia mínima 2 años.',
-            'source_name': 'Test Source',
-            'source_url': 'https://example.com/test-contest'
-        }
-        
-        request = MultiNotificationRequest(
-            recipient_whatsapp=recipient_whatsapp,
-            recipient_email=recipient_email,
-            channels=channels,
-            message="Este es un mensaje de prueba del Sistema de Concursos Educativos",
-            subject="🎓 Prueba de Notificación - Sistema de Concursos",
-            contest_data=test_contest_data
+    async def _send_browser_notification(self, request: MultiNotificationRequest) -> NotificationResult:
+        """Enviar notificación por navegador (simulado)"""
+        # En un entorno real, esto podría usar WebSocket o Server-Sent Events
+        print(f"Browser notification: {request.message}")
+        return NotificationResult(
+            success=True,
+            channel=NotificationChannel.BROWSER,
+            recipient="browser",
+            message=request.message,
+            error=None
         )
-        
-        return await self.send_notification(request)
-    
-    async def send_contest_notification(self, contest_data: Dict[str, Any], recipient_whatsapp: str = None, recipient_email: str = None, channels: List[NotificationChannel] = None) -> List[NotificationResult]:
-        """Enviar notificación de concurso"""
-        if channels is None:
-            channels = [NotificationChannel.BOTH]
-        
-        request = MultiNotificationRequest(
-            recipient_whatsapp=recipient_whatsapp,
-            recipient_email=recipient_email,
-            channels=channels,
-            message=f"Nuevo concurso: {contest_data.get('title', 'Sin título')}",
-            subject=f"🎓 Nuevo Concurso: {contest_data.get('title', 'Sin título')}",
-            contest_data=contest_data
-        )
-        
-        return await self.send_notification(request)
     
     def get_notification_summary(self, results: List[NotificationResult]) -> Dict[str, Any]:
         """Obtener resumen de resultados de notificación"""
@@ -354,14 +213,61 @@ class MultiNotifier:
         
         return summary
 
+    async def send_test_notification(self, recipient_email: str = None, channels: List[NotificationChannel] = None) -> List[NotificationResult]:
+        """Enviar notificación de prueba"""
+        if channels is None:
+            channels = [NotificationChannel.BOTH]
+        
+        test_contest_data = {
+            'title': 'Concurso de Prueba - Matemática',
+            'school_name': 'Escuela Secundaria N° 1',
+            'school_city': 'Paraná',
+            'school_department': 'Paraná',
+            'subject_name': 'Matemática',
+            'date': datetime.now().strftime('%Y-%m-%d'),
+            'registration_deadline': (datetime.now().replace(day=datetime.now().day + 7)).strftime('%Y-%m-%d'),
+            'level': 'Secundario',
+            'shift': 'Mañana',
+            'schedule': '08:00-12:00',
+            'hours_to_cover': 20,
+            'contract_type': 'Temporario',
+            'description': 'Se busca profesor de matemática para cubrir cargo temporario. Requisitos: título docente, experiencia mínima 2 años.',
+            'source_name': 'Test Source',
+            'source_url': 'https://example.com/test-contest'
+        }
+        
+        request = MultiNotificationRequest(
+            recipient_email=recipient_email,
+            channels=channels,
+            message="Este es un mensaje de prueba del Sistema de Concursos Educativos",
+            subject="🎓 Prueba de Notificación - Sistema de Concursos",
+            contest_data=test_contest_data
+        )
+        
+        return await self.send_notification(request)
+    
+    async def send_contest_notification(self, contest_data: Dict[str, Any], recipient_email: str = None, channels: List[NotificationChannel] = None) -> List[NotificationResult]:
+        """Enviar notificación de concurso"""
+        if channels is None:
+            channels = [NotificationChannel.BOTH]
+        
+        request = MultiNotificationRequest(
+            recipient_email=recipient_email,
+            channels=channels,
+            message=f"Nuevo concurso: {contest_data.get('title', 'Sin título')}",
+            subject=f"🎓 Nuevo Concurso: {contest_data.get('title', 'Sin título')}",
+            contest_data=contest_data
+        )
+        
+        return await self.send_notification(request)
+
 # Instancia global
 multi_notifier = MultiNotifier()
 
 # Funciones de conveniencia
-async def send_multi_notification(recipient_whatsapp: str = None, recipient_email: str = None, message: str = "", contest_data: Dict[str, Any] = None, channels: List[NotificationChannel] = None) -> List[NotificationResult]:
+async def send_multi_notification(recipient_email: str = None, message: str = "", contest_data: Dict[str, Any] = None, channels: List[NotificationChannel] = None) -> List[NotificationResult]:
     """Función de conveniencia para enviar notificación múltiple"""
     request = MultiNotificationRequest(
-        recipient_whatsapp=recipient_whatsapp,
         recipient_email=recipient_email,
         channels=channels or [NotificationChannel.BOTH],
         message=message,
@@ -371,6 +277,6 @@ async def send_multi_notification(recipient_whatsapp: str = None, recipient_emai
     
     return await multi_notifier.send_notification(request)
 
-async def send_contest_notification_multi(contest_data: Dict[str, Any], recipient_whatsapp: str = None, recipient_email: str = None) -> List[NotificationResult]:
+async def send_contest_notification_multi(contest_data: Dict[str, Any], recipient_email: str = None) -> List[NotificationResult]:
     """Función de conveniencia para enviar notificación de concurso por múltiples canales"""
-    return await multi_notifier.send_contest_notification(contest_data, recipient_whatsapp, recipient_email)
+    return await multi_notifier.send_contest_notification(contest_data, recipient_email)

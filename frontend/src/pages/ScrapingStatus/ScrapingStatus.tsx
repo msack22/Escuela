@@ -31,8 +31,8 @@ import {
   Refresh as RefreshIcon,
   Settings as SettingsIcon,
 } from '@mui/icons-material';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
-import { format } from 'date-fns';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { format } from 'date-fns/format';
 
 import {
   fetchScrapingStatus,

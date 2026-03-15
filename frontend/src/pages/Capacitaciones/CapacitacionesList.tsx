@@ -33,8 +33,8 @@ import {
   FilterList,
   Refresh,
 } from '@mui/icons-material';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { format } from 'date-fns/format';
+import { es } from 'date-fns/locale/es';
 
 interface Capacitacion {
   id: number;
@@ -93,10 +93,10 @@ const CapacitacionesList: React.FC<CapacitacionesListProps> = ({
 
   const itemsPerPage = 12;
   const totalPages = Math.ceil(capacitaciones.length / itemsPerPage);
-  const currentItems = capacitaciones.slice(
-    (page - 1) * itemsPerPage,
-    page * itemsPerPage
-  );
+  // const currentItems = capacitaciones.slice(
+  //   (page - 1) * itemsPerPage,
+  //   page * itemsPerPage
+  // );
 
   const handleFilterChange = (field: string, value: any) => {
     setFilters(prev => ({ ...prev, [field]: value }));

@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from datetime import datetime
-from pydantic import BaseModel
 
 
 @dataclass
@@ -15,11 +14,12 @@ class ScrapedContest:
     school_name: str
     school_city: str
     school_department: str
-    school_address: Optional[str]
     subject_name: str
     source_url: str
     source_name: str
+    publication_date: Optional[datetime] = None  # Fecha de publicación original
     publication_link: Optional[str] = None  # Link de la publicación original
+    school_address: Optional[str] = None
     
     # Additional contest details
     level: Optional[str] = None          # primaria, secundaria, inicial, etc.

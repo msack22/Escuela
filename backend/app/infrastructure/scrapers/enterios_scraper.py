@@ -13,7 +13,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('/tmp/cge_scraper.log'),
+        logging.FileHandler('C:/tmp/cge_scraper.log'),
         logging.StreamHandler()
     ]
 )
@@ -654,21 +654,21 @@ class EntreriosScraper(BaseScraper):
         # Generar combinaciones únicas
         used_combinations = set()
         
-        for i in range(100):  # Generar 100 concursos
-            while True:
-                school = schools[i % len(schools)]
-                city = cities[i % len(cities)]
-                subject = subjects[i % len(subjects)]
-                contest_type = contest_types[i % len(contest_types)]
+        for i in range(0):  # DESACTIVADO: Generar 100 concursos - estaba causando timeouts
+            # while True:
+            #     school = schools[i % len(schools)]
+            #     city = cities[i % len(cities)]
+            #     subject = subjects[i % len(subjects)]
+            #     contest_type = contest_types[i % len(contest_types)]
                 
-                # Crear combinación única
-                combination = f"{school}_{city}_{subject}_{contest_type}"
-                if combination not in used_combinations:
-                    used_combinations.add(combination)
-                    break
+            #     # Crear combinación única
+            #     combination = f"{school}_{city}_{subject}_{contest_type}"
+            #     if combination not in used_combinations:
+            #         used_combinations.add(combination)
+            #         break
             
             # Crear título
-            title = f"{contest_type} {subject} - {school} {city}"
+            title = f"Concurso desactivado - {i}"
             
             # Crear URL simulada
             url_slug = title.lower().replace(' ', '-').replace('°', '').replace('ñ', 'n')
@@ -677,25 +677,23 @@ class EntreriosScraper(BaseScraper):
             try:
                 contest = ScrapedContest(
                     title=title[:200],
-                    description=f"Concurso generado automáticamente - {contest_type} para {subject} en {school} de {city}\n\nURL: {url}",
+                    description=f"Concurso desactivado #{i}",
                     date=datetime.now(),
                     registration_deadline=datetime.now() + timedelta(days=30),
-                    school_name=school,
-                    school_city=city,
-                    school_department=self._get_department_from_city(city),
-                    school_address=f"Dirección de {school} en {city}",
-                    subject_name=subject,
+                    school_name="Test School",
+                    school_city="Test City",
+                    school_department="Test Department",
+                    subject_name=subjects[0],
                     source_url=url,
                     source_name=self.name,
-                    publication_link=url,
                     level="Secundario"
                 )
                 contests.append(contest)
-                logger.info(f"✅ Concurso generado: {title}")
+                logger.info(f"✅ Concurso desactivado: {title}")
                 
             except Exception as e:
                 logger.error(f"❌ Error generando concurso {title}: {e}")
-                continue
+                # continue
         
         return contests
     

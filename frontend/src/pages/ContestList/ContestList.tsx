@@ -17,6 +17,10 @@ import {
   MenuItem,
   FormControl,
   InputLabel,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
   Chip,
   IconButton,
   Tooltip,
@@ -30,8 +34,11 @@ import {
   Clear as ClearIcon,
   OpenInNew as OpenInNewIcon,
   LocationOn as LocationIcon,
+  Info as InfoIcon,
+  Source as SourceIcon,
+  CalendarToday as CalendarIcon,
 } from '@mui/icons-material';
-import { useQuery } from 'react-query';
+import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 
 import {
@@ -48,13 +55,16 @@ import {
 const ContestList: React.FC = () => {
   const [filters, setFilters] = useState({
     title_contains: '',
-    subject_id: '',
-    city: '',
-    department: '',
+    subject_ids: [],
+    cities: [],
+    departments: [],
     date_from: '',
     date_to: '',
     is_active: true,
   });
+
+  const [selectedContest, setSelectedContest] = useState<any>(null);
+  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
 
   const [pagination, setPagination] = useState({
     skip: 0,
@@ -89,9 +99,9 @@ const ContestList: React.FC = () => {
   const handleClearFilters = () => {
     setFilters({
       title_contains: '',
-      subject_id: '',
-      city: '',
-      department: '',
+      subject_ids: [],
+      cities: [],
+      departments: [],
       date_from: '',
       date_to: '',
       is_active: true,
@@ -118,6 +128,16 @@ const ContestList: React.FC = () => {
 
   const totalPages = Math.ceil((contestsData?.total || 0) / pagination.limit);
   const currentPage = Math.floor(pagination.skip / pagination.limit) + 1;
+
+  const handleOpenDetail = (contest: any) => {
+    setSelectedContest(contest);
+    setDetailDialogOpen(true);
+  };
+
+  const handleCloseDetail = () => {
+    setDetailDialogOpen(false);
+    setSelectedContest(null);
+  };
 
   if (error) {
     return (
@@ -159,13 +179,23 @@ const ContestList: React.FC = () => {
 
             <Grid item xs={12} sm={6} md={3}>
               <FormControl fullWidth>
-                <InputLabel>Materia</InputLabel>
+                <InputLabel>Materias</InputLabel>
                 <Select
-                  value={filters.subject_id}
-                  label="Materia"
-                  onChange={(e) => handleFilterChange('subject_id', e.target.value)}
+                  multiple
+                  value={filters.subject_ids}
+                  label="Materias"
+                  onChange={(e) => handleFilterChange('subject_ids', e.target.value)}
+                  renderValue={(selected) => (
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                      {selected.map((value: any) => (
+                        <Chip key={value} label={subjects && Array.isArray(subjects) ? subjects.find((s: any) => s.id === value)?.name || value : value} size="small" />
+                      ))}
+                    </Box>
+                  )}
                 >
-                  <MenuItem value="">Todas</MenuItem>
+                  <MenuItem value="">
+                    <em>Todas</em>
+                  </MenuItem>
                   {subjects?.map((subject: any) => (
                     <MenuItem key={subject.id} value={subject.id}>
                       {subject.name}
@@ -177,13 +207,23 @@ const ContestList: React.FC = () => {
 
             <Grid item xs={12} sm={6} md={3}>
               <FormControl fullWidth>
-                <InputLabel>Ciudad</InputLabel>
+                <InputLabel>Ciudades</InputLabel>
                 <Select
-                  value={filters.city}
-                  label="Ciudad"
-                  onChange={(e) => handleFilterChange('city', e.target.value)}
+                  multiple
+                  value={filters.cities}
+                  label="Ciudades"
+                  onChange={(e) => handleFilterChange('cities', e.target.value)}
+                  renderValue={(selected) => (
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                      {selected.map((value: any) => (
+                        <Chip key={value} label={value} size="small" />
+                      ))}
+                    </Box>
+                  )}
                 >
-                  <MenuItem value="">Todas</MenuItem>
+                  <MenuItem value="">
+                    <em>Todas</em>
+                  </MenuItem>
                   {citiesData?.cities?.map((city: string) => (
                     <MenuItem key={city} value={city}>
                       {city}
@@ -195,13 +235,23 @@ const ContestList: React.FC = () => {
 
             <Grid item xs={12} sm={6} md={3}>
               <FormControl fullWidth>
-                <InputLabel>Departamento</InputLabel>
+                <InputLabel>Departamentos</InputLabel>
                 <Select
-                  value={filters.department}
-                  label="Departamento"
-                  onChange={(e) => handleFilterChange('department', e.target.value)}
+                  multiple
+                  value={filters.departments}
+                  label="Departamentos"
+                  onChange={(e) => handleFilterChange('departments', e.target.value)}
+                  renderValue={(selected) => (
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                      {selected.map((value: any) => (
+                        <Chip key={value} label={value} size="small" />
+                      ))}
+                    </Box>
+                  )}
                 >
-                  <MenuItem value="">Todos</MenuItem>
+                  <MenuItem value="">
+                    <em>Todos</em>
+                  </MenuItem>
                   {departmentsData?.departments?.map((dept: string) => (
                     <MenuItem key={dept} value={dept}>
                       {dept}
@@ -289,7 +339,9 @@ const ContestList: React.FC = () => {
                     <TableCell>Materia</TableCell>
                     <TableCell>Escuela</TableCell>
                     <TableCell>Ciudad</TableCell>
-                    <TableCell>Fecha</TableCell>
+                    <TableCell>Fecha Publicación</TableCell>
+                    <TableCell>Fecha Concurso</TableCell>
+                    <TableCell>Fuente</TableCell>
                     <TableCell>Estado</TableCell>
                     <TableCell>Acciones</TableCell>
                   </TableRow>
@@ -327,6 +379,16 @@ const ContestList: React.FC = () => {
                         </Box>
                       </TableCell>
                       <TableCell>
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <CalendarIcon fontSize="small" color="action" />
+                          <Typography variant="body2">
+                            {contest.publication_date
+                              ? format(new Date(contest.publication_date), 'dd/MM/yyyy')
+                              : 'No especificada'}
+                          </Typography>
+                        </Box>
+                      </TableCell>
+                      <TableCell>
                         <Typography variant="body2">
                           {contest.date
                             ? format(new Date(contest.date), 'dd/MM/yyyy HH:mm')
@@ -339,6 +401,17 @@ const ContestList: React.FC = () => {
                         )}
                       </TableCell>
                       <TableCell>
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <SourceIcon fontSize="small" color="action" />
+                          <Chip
+                            label={contest.source_name}
+                            size="small"
+                            color={contest.source_name === 'Facebook' ? 'primary' : 'secondary'}
+                            variant="outlined"
+                          />
+                        </Box>
+                      </TableCell>
+                      <TableCell>
                         <Chip
                           label={contest.is_active ? 'Activo' : 'Inactivo'}
                           size="small"
@@ -346,14 +419,25 @@ const ContestList: React.FC = () => {
                         />
                       </TableCell>
                       <TableCell>
-                        <Tooltip title="Ver fuente original">
-                          <IconButton
-                            size="small"
-                            onClick={() => window.open(contest.source.url, '_blank')}
-                          >
-                            <OpenInNewIcon />
-                          </IconButton>
-                        </Tooltip>
+                        <Box display="flex" gap={1}>
+                          <Tooltip title="Ver detalle completo">
+                            <IconButton
+                              size="small"
+                              onClick={() => handleOpenDetail(contest)}
+                              color="primary"
+                            >
+                              <InfoIcon />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Ver fuente original">
+                            <IconButton
+                              size="small"
+                              onClick={() => window.open(contest.source_url, '_blank')}
+                            >
+                              <OpenInNewIcon />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -377,6 +461,174 @@ const ContestList: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Detail Dialog */}
+      <Dialog
+        open={detailDialogOpen}
+        onClose={handleCloseDetail}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Typography variant="h6">Detalle del Concurso</Typography>
+        </DialogTitle>
+        <DialogContent>
+          {selectedContest && (
+            <Grid container spacing={2}>
+              <Grid item xs={12}>
+                <Typography variant="h6" gutterBottom>
+                  {selectedContest.title}
+                </Typography>
+                <Typography variant="body2" color="textSecondary" paragraph>
+                  {selectedContest.description}
+                </Typography>
+              </Grid>
+              
+              <Grid item xs={12} sm={6}>
+                <Typography variant="subtitle2" color="primary">
+                  Escuela
+                </Typography>
+                <Typography variant="body2">
+                  {selectedContest.school.name}
+                </Typography>
+                <Typography variant="caption" color="textSecondary">
+                  {selectedContest.school.city}, {selectedContest.school.department}
+                </Typography>
+              </Grid>
+              
+              <Grid item xs={12} sm={6}>
+                <Typography variant="subtitle2" color="primary">
+                  Materia
+                </Typography>
+                <Chip
+                  label={selectedContest.subject.name}
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                />
+              </Grid>
+              
+              <Grid item xs={12} sm={6}>
+                <Typography variant="subtitle2" color="primary">
+                  Fecha del Concurso
+                </Typography>
+                <Typography variant="body2">
+                  {selectedContest.date
+                    ? format(new Date(selectedContest.date), 'dd/MM/yyyy HH:mm')
+                    : 'No especificada'}
+                </Typography>
+              </Grid>
+              
+              <Grid item xs={12} sm={6}>
+                <Typography variant="subtitle2" color="primary">
+                  Fecha de Publicación
+                </Typography>
+                <Typography variant="body2">
+                  {selectedContest.publication_date
+                    ? format(new Date(selectedContest.publication_date), 'dd/MM/yyyy')
+                    : 'No especificada'}
+                </Typography>
+              </Grid>
+              
+              <Grid item xs={12} sm={6}>
+                <Typography variant="subtitle2" color="primary">
+                  Fuente
+                </Typography>
+                <Chip
+                  label={selectedContest.source_name}
+                  size="small"
+                  color={selectedContest.source_name === 'Facebook' ? 'primary' : 'secondary'}
+                  variant="outlined"
+                />
+              </Grid>
+              
+              <Grid item xs={12} sm={6}>
+                <Typography variant="subtitle2" color="primary">
+                  Estado
+                </Typography>
+                <Chip
+                  label={selectedContest.is_active ? 'Activo' : 'Inactivo'}
+                  size="small"
+                  color={selectedContest.is_active ? 'success' : 'default'}
+                />
+              </Grid>
+              
+              {selectedContest.level && (
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="subtitle2" color="primary">
+                    Nivel
+                  </Typography>
+                  <Typography variant="body2">
+                    {selectedContest.level}
+                  </Typography>
+                </Grid>
+              )}
+              
+              {selectedContest.shift && (
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="subtitle2" color="primary">
+                    Turno
+                  </Typography>
+                  <Typography variant="body2">
+                    {selectedContest.shift}
+                  </Typography>
+                </Grid>
+              )}
+              
+              {selectedContest.hours_to_cover && (
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="subtitle2" color="primary">
+                    Horas a cubrir
+                  </Typography>
+                  <Typography variant="body2">
+                    {selectedContest.hours_to_cover} horas
+                  </Typography>
+                </Grid>
+              )}
+              
+              {selectedContest.contract_type && (
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="subtitle2" color="primary">
+                    Tipo de Contrato
+                  </Typography>
+                  <Typography variant="body2">
+                    {selectedContest.contract_type}
+                  </Typography>
+                </Grid>
+              )}
+              
+              {selectedContest.registration_deadline && (
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="subtitle2" color="primary">
+                    Fecha de Cierre de Inscripción
+                  </Typography>
+                  <Typography variant="body2">
+                    {format(new Date(selectedContest.registration_deadline), 'dd/MM/yyyy')}
+                  </Typography>
+                </Grid>
+              )}
+              
+              <Grid item xs={12}>
+                <Typography variant="subtitle2" color="primary">
+                  Enlace Original
+                </Typography>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<OpenInNewIcon />}
+                  onClick={() => window.open(selectedContest.source_url, '_blank')}
+                  sx={{ mt: 1 }}
+                >
+                  Ver fuente original
+                </Button>
+              </Grid>
+            </Grid>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDetail}>Cerrar</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

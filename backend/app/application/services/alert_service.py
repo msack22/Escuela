@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.domain.models.models import Alert, Contest
 from app.domain.repositories.repositories import AlertRepository, ContestRepository
 from app.infrastructure.notifications.base_notifier import BaseNotifier, NotificationMessage
-from app.infrastructure.notifications.whatsapp_notifier import WhatsAppNotifier
+from app.infrastructure.notifications.email_notifier import EmailNotifier
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -24,20 +24,20 @@ class AlertService:
     
     def _initialize_notifiers(self):
         """Initialize available notification services"""
-        whatsapp_notifier = WhatsAppNotifier()
-        if whatsapp_notifier.is_configured():
-            self.notifiers.append(whatsapp_notifier)
-            logger.info("WhatsApp notifier initialized")
+        email_notifier = EmailNotifier()
+        if email_notifier.is_configured():
+            self.notifiers.append(email_notifier)
+            logger.info("Email notifier initialized")
         else:
-            logger.warning("WhatsApp notifier not configured")
+            logger.warning("Email notifier not configured")
     
-    def create_alert(self, user_name: str, whatsapp_number: str, 
-                    subject_preferences: List[str], max_distance_km: int = 50) -> Alert:
+    def create_alert(self, user_name: str, email_address: str = None, 
+                    subject_preferences: List[str] = None, max_distance_km: int = 50) -> Alert:
         """Create a new alert"""
         alert = Alert(
             user_name=user_name,
-            whatsapp_number=whatsapp_number,
-            subject_preferences=json.dumps(subject_preferences),
+            email_address=email_address,
+            subject_preferences=json.dumps(subject_preferences or []),
             max_distance_km=max_distance_km,
             is_active=True
         )

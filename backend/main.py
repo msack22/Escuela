@@ -7,7 +7,7 @@ from datetime import datetime
 import logging
 
 from app.core.database import engine, SessionLocal, get_db
-from app.api.routes import contests, alerts, scraping, schools, subjects, logs, capacitaciones, diplomas, diploma_scraping
+from app.api.routes import contests, alerts, scraping, schools, subjects, logs, capacitaciones, diplomas, diploma_scraping, scraping_modern, scraping_async, resolutions
 from app.infrastructure.scrapers.scraper_factory import ScrapingService
 from app.application.services.scheduler_service import ScrapingScheduler
 
@@ -17,7 +17,11 @@ logger = logging.getLogger(__name__)
 
 # Create database tables
 from app.domain.models.models import Base
+from app.domain.models.resolution_models import Base as ResolutionBase
+
+# Crear tablas de ambos modelos
 Base.metadata.create_all(bind=engine)
+ResolutionBase.metadata.create_all(bind=engine)
 
 # Create FastAPI app
 app = FastAPI(
@@ -26,19 +30,22 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Add CORS middleware
+# Add CORS middleware - Deshabilitado para desarrollo
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:4000", "http://127.0.0.1:3000", "http://127.0.0.1:3001", "http://127.0.0.1:4000"],
+    allow_origins=["*"],  # Permitir cualquier origen
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Permitir cualquier método
+    allow_headers=["*"],  # Permitir cualquier header
 )
 
 # Include API routers
 app.include_router(contests.router, prefix="/api/contests", tags=["contests"])
 app.include_router(alerts.router, prefix="/api/alerts", tags=["alerts"])
 app.include_router(scraping.router, prefix="/api/scraping", tags=["scraping"])
+app.include_router(scraping_modern.router, tags=["scraping-modern"])
+app.include_router(scraping_async.router, tags=["scraping-async"])
+app.include_router(resolutions.router, tags=["resolutions"])
 app.include_router(schools.router, prefix="/api/schools", tags=["schools"])
 app.include_router(subjects.router, prefix="/api/subjects", tags=["subjects"])
 app.include_router(logs.router, prefix="/api/logs", tags=["logs"])
