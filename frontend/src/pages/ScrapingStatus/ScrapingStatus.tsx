@@ -10,6 +10,7 @@ import {
   Tag,
   Progress,
   Empty,
+  Select,
 } from 'antd';
 import {
   PlayCircleOutlined,
@@ -52,7 +53,8 @@ const ScrapingStatus: React.FC = () => {
   });
 
   const runMutation = useMutation({
-    mutationFn: () => runManualScraping(),
+    mutationFn: (sources?: string[]) =>
+      runManualScraping(sources && sources.length ? sources : undefined),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['scrapingStatus'] });
       queryClient.invalidateQueries({ queryKey: ['scrapingLogs'] });
@@ -75,6 +77,8 @@ const ScrapingStatus: React.FC = () => {
   const apiUnreachable = st.api_status === 'unreachable';
   const isRunning = runMutation.isPending || st.is_running || (progress as any)?.running;
   const progressData = progress as any;
+  const availableSources: string[] = Array.isArray(st.available_sources) ? st.available_sources : [];
+  const [selectedSources, setSelectedSources] = React.useState<string[]>([]);
 
   const logColumns = [
     {
@@ -178,40 +182,60 @@ const ScrapingStatus: React.FC = () => {
 
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <Card title="Acciones" loading={statusLoading}>
-          <Space wrap size="middle">
-            <Button
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              loading={runMutation.isPending}
-              onClick={() => runMutation.mutate()}
-            >
-              Ejecutar scraping ahora
-            </Button>
-            <Button
-              icon={<PlayCircleOutlined />}
-              loading={startMutation.isPending}
-              onClick={() => startMutation.mutate()}
-            >
-              Iniciar scheduler
-            </Button>
-            <Button
-              danger
-              icon={<StopOutlined />}
-              loading={stopMutation.isPending}
-              onClick={() => stopMutation.mutate()}
-            >
-              Detener scheduler
-            </Button>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => {
-                queryClient.invalidateQueries({ queryKey: ['scrapingStatus'] });
-                queryClient.invalidateQueries({ queryKey: ['scrapingLogs'] });
-                queryClient.invalidateQueries({ queryKey: ['scrapingProgress'] });
-              }}
-            >
-              Actualizar
-            </Button>
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Space align="center" wrap>
+              <Text type="secondary">Fuentes para ejecutar (vacío = todas):</Text>
+              <Select
+                mode="multiple"
+                allowClear
+                placeholder={availableSources.length ? 'Todas las fuentes' : 'Sin fuentes disponibles'}
+                style={{ minWidth: 260 }}
+                disabled={isRunning || !availableSources.length}
+                value={selectedSources}
+                onChange={(values) => setSelectedSources(values)}
+                options={availableSources.map((s) => ({ label: s, value: s }))}
+              />
+            </Space>
+
+            <Space wrap size="middle">
+              <Button
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                loading={runMutation.isPending}
+                onClick={() =>
+                  runMutation.mutate(
+                    selectedSources.length ? selectedSources : undefined,
+                  )
+                }
+              >
+                Ejecutar scraping ahora
+              </Button>
+              <Button
+                icon={<PlayCircleOutlined />}
+                loading={startMutation.isPending}
+                onClick={() => startMutation.mutate()}
+              >
+                Iniciar scheduler
+              </Button>
+              <Button
+                danger
+                icon={<StopOutlined />}
+                loading={stopMutation.isPending}
+                onClick={() => stopMutation.mutate()}
+              >
+                Detener scheduler
+              </Button>
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={() => {
+                  queryClient.invalidateQueries({ queryKey: ['scrapingStatus'] });
+                  queryClient.invalidateQueries({ queryKey: ['scrapingLogs'] });
+                  queryClient.invalidateQueries({ queryKey: ['scrapingProgress'] });
+                }}
+              >
+                Actualizar
+              </Button>
+            </Space>
           </Space>
         </Card>
 

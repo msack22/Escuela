@@ -1,11 +1,15 @@
 import React from 'react';
-import { Card, Typography, Button, Space, Alert, Spin, Descriptions } from 'antd';
+import { Card, Typography, Button, Space, Alert, Descriptions, Select, Table, Tag } from 'antd';
 import { PlayCircleOutlined, StopOutlined, ThunderboltOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getSchedulerStatus,
   restartScheduler,
   runScrapingOnce,
+  getSchedulerConfig,
+  updateSchedulerConfig,
+  getSchedulerHistory,
+  SchedulerHistoryRun,
 } from '../../services/api';
 
 const { Title, Text } = Typography;
@@ -20,8 +24,33 @@ const SchedulerControl: React.FC = () => {
     retry: 1,
   });
 
+  const [selectedSources, setSelectedSources] = React.useState<string[]>([]);
+  const [configHours, setConfigHours] = React.useState<number[]>([8, 12, 16, 20]);
+  const [configSources, setConfigSources] = React.useState<string[]>(['cge_simple', 'facebook_cge']);
+
+  const { data: schedulerConfig } = useQuery({
+    queryKey: ['schedulerConfig'],
+    queryFn: getSchedulerConfig,
+  });
+
+  const { data: schedulerHistory } = useQuery({
+    queryKey: ['schedulerHistory'],
+    queryFn: () => getSchedulerHistory(20),
+    refetchInterval: 60000,
+  });
+
+  React.useEffect(() => {
+    if (schedulerConfig) {
+      setConfigHours(schedulerConfig.scheduled_hours ?? []);
+      setConfigSources(schedulerConfig.auto_sources ?? []);
+    }
+  }, [schedulerConfig]);
+
   const runOnceMutation = useMutation({
-    mutationFn: () => runScrapingOnce({}),
+    mutationFn: () =>
+      runScrapingOnce(
+        selectedSources.length ? { sources: selectedSources } : {},
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['schedulerStatus'] });
     },
@@ -32,7 +61,72 @@ const SchedulerControl: React.FC = () => {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['schedulerStatus'] }),
   });
 
+  const updateConfigMutation = useMutation({
+    mutationFn: () =>
+      updateSchedulerConfig({
+        scheduled_hours: configHours,
+        auto_sources: configSources,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['schedulerStatus'] });
+      queryClient.invalidateQueries({ queryKey: ['schedulerConfig'] });
+    },
+  });
+
   const apiUnreachable = (schedulerStatus as any)?.api_status === 'unreachable';
+  const availableSources: string[] = Array.isArray((schedulerStatus as any)?.available_sources)
+    ? (schedulerStatus as any).available_sources
+    : [];
+
+  const hourOptions = Array.from({ length: 24 }, (_, h) => ({
+    label: `${String(h).padStart(2, '0')}:00`,
+    value: h,
+  }));
+
+  const historyColumns = [
+    {
+      title: 'Inicio (AR)',
+      dataIndex: 'started_at',
+      key: 'started_at',
+      render: (value: string, row: SchedulerHistoryRun) =>
+        new Date(value).toLocaleString('es-AR', {
+          timeZone: row.timezone,
+          hour12: false,
+        }),
+    },
+    {
+      title: 'Hora AR',
+      dataIndex: 'hour_ar',
+      key: 'hour_ar',
+      render: (h: number) => `${String(h).padStart(2, '0')}:00`,
+    },
+    {
+      title: 'Fuentes',
+      dataIndex: 'sources',
+      key: 'sources',
+      render: (sources: string[]) =>
+        sources.map((s) => (
+          <Tag key={s} color={s.includes('facebook') ? 'geekblue' : 'green'}>
+            {s}
+          </Tag>
+        )),
+    },
+    {
+      title: 'Concursos totales',
+      dataIndex: 'total_contests',
+      key: 'total_contests',
+    },
+    {
+      title: 'CGE',
+      dataIndex: 'cgeCount',
+      key: 'cgeCount',
+    },
+    {
+      title: 'Facebook',
+      dataIndex: 'facebookCount',
+      key: 'facebookCount',
+    },
+  ];
 
   return (
     <div>
@@ -62,18 +156,80 @@ const SchedulerControl: React.FC = () => {
           <Descriptions.Item label="Próxima ejecución">
             {schedulerStatus?.next_run ?? '-'}
           </Descriptions.Item>
+          <Descriptions.Item label="Zona horaria">
+            {(schedulerStatus as any)?.timezone ?? 'America/Argentina/Buenos_Aires'}
+          </Descriptions.Item>
           <Descriptions.Item label="Jobs activos">
             {schedulerStatus?.job_count ?? 0}
           </Descriptions.Item>
+          <Descriptions.Item label="Horarios automáticos (AR)">
+            {(schedulerStatus as any)?.scheduled_hours?.length
+              ? (schedulerStatus as any).scheduled_hours
+                  .map((h: number) => `${String(h).padStart(2, '0')}:00`)
+                  .join(', ')
+              : '-'}
+          </Descriptions.Item>
+          <Descriptions.Item label="Fuentes automáticas">
+            {(schedulerStatus as any)?.auto_sources?.length
+              ? (schedulerStatus as any).auto_sources.join(', ')
+              : '-'}
+          </Descriptions.Item>
           <Descriptions.Item label="Fuentes disponibles">
-            {Array.isArray(schedulerStatus?.available_sources) &&
-            schedulerStatus.available_sources.length > 0
-              ? schedulerStatus.available_sources.join(', ')
-              : 'Ninguna'}
+            {availableSources.length > 0 ? availableSources.join(', ') : 'Ninguna'}
           </Descriptions.Item>
         </Descriptions>
 
-        <Space style={{ marginTop: 16 }} wrap>
+        <Space direction="vertical" style={{ marginTop: 16, width: '100%' }} size="middle">
+          <Space align="center" wrap>
+            <Text type="secondary">Fuentes para ejecutar (vacío = todas):</Text>
+            <Select
+              mode="multiple"
+              allowClear
+              placeholder={availableSources.length ? 'Todas las fuentes' : 'Sin fuentes disponibles'}
+              style={{ minWidth: 260 }}
+              disabled={runOnceMutation.isPending || !availableSources.length}
+              value={selectedSources}
+              onChange={(values) => setSelectedSources(values)}
+              options={availableSources.map((s) => ({ label: s, value: s }))}
+            />
+          </Space>
+
+          <Card size="small" title="Configuración automática" style={{ marginTop: 8 }}>
+            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              <Space align="center" wrap style={{ width: '100%' }}>
+                <Text type="secondary">Horarios (hora Argentina):</Text>
+                <Select
+                  mode="multiple"
+                  style={{ minWidth: 260 }}
+                  value={configHours}
+                  onChange={(values) => setConfigHours(values as number[])}
+                  options={hourOptions}
+                  placeholder="Seleccionar horas"
+                />
+              </Space>
+              <Space align="center" wrap style={{ width: '100%' }}>
+                <Text type="secondary">Fuentes automáticas:</Text>
+                <Select
+                  mode="multiple"
+                  allowClear
+                  style={{ minWidth: 260 }}
+                  value={configSources}
+                  onChange={(values) => setConfigSources(values as string[])}
+                  options={availableSources.map((s) => ({ label: s, value: s }))}
+                  placeholder="Seleccionar fuentes"
+                />
+              </Space>
+              <Button
+                type="primary"
+                loading={updateConfigMutation.isPending}
+                onClick={() => updateConfigMutation.mutate()}
+              >
+                Guardar configuración
+              </Button>
+            </Space>
+          </Card>
+
+          <Space wrap>
           <Button
             type="primary"
             icon={<ThunderboltOutlined />}
@@ -95,7 +251,18 @@ const SchedulerControl: React.FC = () => {
           >
             Actualizar estado
           </Button>
+          </Space>
         </Space>
+      </Card>
+
+      <Card title="Historial de ejecuciones automáticas" style={{ marginTop: 24 }}>
+        <Table
+          size="small"
+          rowKey={(row) => row.started_at}
+          dataSource={schedulerHistory?.runs ?? []}
+          columns={historyColumns}
+          pagination={false}
+        />
       </Card>
     </div>
   );

@@ -25,6 +25,7 @@ export const alertsRoutes: FastifyPluginAsync = async (app) => {
       email_address?: string;
       whatsapp_number?: string;
       subject_preferences?: string | string[];
+      departments?: string[];
       max_distance_km?: number;
       notification_channels?: string;
     };
@@ -45,8 +46,13 @@ export const alertsRoutes: FastifyPluginAsync = async (app) => {
       }
     }
     const prefs = body.subject_preferences;
+    const departments = Array.isArray(body.departments) ? body.departments : [];
     const subjectPreferences =
-      typeof prefs === "string" ? prefs : Array.isArray(prefs) ? JSON.stringify(prefs) : "[]";
+      typeof prefs === "string"
+        ? prefs
+        : Array.isArray(prefs)
+          ? JSON.stringify({ subjects: prefs, departments })
+          : JSON.stringify({ subjects: [], departments });
     const alert = await req.server.prisma.alert.create({
       data: {
         user_id: body.user_id ?? null,
@@ -81,12 +87,56 @@ export const alertsRoutes: FastifyPluginAsync = async (app) => {
     return alert;
   });
 
-  app.put<{ Params: { id: string }; Body: Record<string, unknown> }>("/:id", async (req, reply) => {
+  app.put<{
+    Params: { id: string };
+    Body: {
+      user_id?: number | null;
+      user_name?: string | null;
+      email_address?: string | null;
+      whatsapp_number?: string | null;
+      subject_preferences?: string | string[] | null;
+      departments?: string[] | null;
+      max_distance_km?: number | null;
+      notification_channels?: string | null;
+      is_active?: boolean | null;
+    };
+  }>("/:id", async (req, reply) => {
     const id = parseInt(req.params.id, 10);
     if (Number.isNaN(id)) return reply.status(400).send({ error: "Invalid id" });
+
+    const body = req.body ?? {};
+
+    const prefs = body.subject_preferences;
+    const departments = Array.isArray(body.departments) ? body.departments : undefined;
+    const subjectPreferences =
+      prefs == null && departments == null
+        ? undefined
+        : (() => {
+            if (typeof prefs === "string") return prefs;
+            if (Array.isArray(prefs) || Array.isArray(departments)) {
+              return JSON.stringify({
+                subjects: Array.isArray(prefs) ? prefs : [],
+                departments: Array.isArray(departments) ? departments : [],
+              });
+            }
+            return undefined;
+          })();
+
+    const data: Parameters<typeof req.server.prisma.alert.update>[0]["data"] = {};
+
+    if ("user_id" in body) data.user_id = body.user_id ?? null;
+    if ("user_name" in body && body.user_name != null) data.user_name = body.user_name;
+    // Email y WhatsApp se derivan del usuario; ignoramos actualizaciones directas desde el cliente.
+    if (subjectPreferences !== undefined) data.subject_preferences = subjectPreferences;
+    if ("max_distance_km" in body && body.max_distance_km != null)
+      data.max_distance_km = body.max_distance_km;
+    if ("notification_channels" in body && body.notification_channels != null)
+      data.notification_channels = body.notification_channels;
+    if ("is_active" in body && body.is_active != null) data.is_active = body.is_active;
+
     const alert = await req.server.prisma.alert.update({
       where: { id },
-      data: req.body as Parameters<typeof req.server.prisma.alert.update>[0]["data"],
+      data,
     });
     return alert;
   });

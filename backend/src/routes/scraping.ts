@@ -3,8 +3,32 @@ import type { PrismaClient } from "@prisma/client";
 import { runCgeScraper } from "../scrapers/cge-scraper.js";
 import { runFacebookCgeScraper } from "../scrapers/facebook-cge-scraper.js";
 import { schedulerService } from "../services/scheduler.service.js";
+import { appLogger } from "../lib/logger.js";
 
-async function runScraperBySource(prisma: PrismaClient, source: string): Promise<{ count: number; success: boolean; error?: string }> {
+export async function runScraperBySource(
+  prisma: PrismaClient,
+  source: string,
+): Promise<{ count: number; success: boolean; error?: string }> {
+  appLogger.info("Scraping → runScraperBySource called", { source });
+
+  // Ejecutar todos los scrapers conocidos
+  if (source === "all") {
+    let total = 0;
+
+    appLogger.info("Scraping → running CGE scraper (all)");
+    const cgeCount = await runCgeScraper(prisma);
+    total += cgeCount;
+
+    appLogger.info("Scraping → running Facebook CGE scraper (all)");
+    const fbCount = await runFacebookCgeScraper(prisma);
+    total += fbCount;
+
+    // Futuras fuentes (datos_abiertos_argentina, puntos_digitales, etc.) pueden sumarse aquí.
+
+    appLogger.info("Scraping → all scrapers finished", { total, cgeCount, fbCount });
+    return { count: total, success: true };
+  }
+
   if (source === "cge_simple" || source === "cge_enterios_completo") {
     const count = await runCgeScraper(prisma);
     return { count, success: true };
@@ -90,33 +114,67 @@ export const scrapingRoutes: FastifyPluginAsync = async (app) => {
     return { message: "Scheduler stopped successfully" };
   });
 
-  app.post<{ Body?: { source?: string } }>("/run", async (req, reply) => {
-    const source = req.body?.source ?? "cge_simple";
+  app.post<{ Body?: { source?: string; sources?: string[] } }>("/run", async (req, reply) => {
+    const body = req.body ?? {};
+    const sources: string[] =
+      Array.isArray(body.sources) && body.sources.length > 0
+        ? body.sources
+        : body.source
+          ? [body.source]
+          : ["all"];
+
     const start = Date.now();
-    schedulerService.setCycleProgress({ running: true, step: `Scraping ${source}...`, source });
+    schedulerService.setCycleProgress({
+      running: true,
+      step: `Scraping ${sources.join(", ")}...`,
+      source: sources.join(","),
+    });
+
     try {
-      const { count, success, error } = await runScraperBySource(req.server.prisma, source);
-      const elapsed = (Date.now() - start) / 1000;
+      const results: { source: string; count: number; success: boolean; error?: string }[] = [];
+
+      for (const src of sources) {
+        const { count, success, error } = await runScraperBySource(req.server.prisma, src);
+        const elapsed = (Date.now() - start) / 1000;
+
+        results.push({ source: src, count, success, error });
+
+        await req.server.prisma.scrapingLog.create({
+          data: {
+            source_name: src,
+            status: success ? "success" : "error",
+            contests_found: count,
+            contests_processed: count,
+            error_message: error ?? null,
+            execution_time_seconds: elapsed,
+            finished_at: new Date(),
+          },
+        });
+      }
+
+      const totalCount = results.reduce((acc, r) => acc + r.count, 0);
+      const anyError = results.some((r) => !r.success);
+      const elapsedTotal = (Date.now() - start) / 1000;
+
       schedulerService.setLastRun(new Date().toISOString());
       schedulerService.setCycleProgress({ running: false });
-      await req.server.prisma.scrapingLog.create({
-        data: {
-          source_name: source,
-          status: success ? "success" : "error",
-          contests_found: count,
-          contests_processed: count,
-          error_message: error ?? null,
-          execution_time_seconds: elapsed,
-          finished_at: new Date(),
-        },
-      });
-      return { success, contests_found: count, execution_time_seconds: elapsed, message: success ? `Scraping ${source} finalizado` : error };
+
+      return {
+        success: !anyError,
+        contests_found: totalCount,
+        execution_time_seconds: elapsedTotal,
+        results,
+        message: !anyError
+          ? `Scraping ${sources.join(", ")} finalizado`
+          : "Scraping finalizado con errores en alguna fuente",
+      };
     } catch (e) {
       const err = e as Error;
       schedulerService.setCycleProgress({ running: false });
+
       await req.server.prisma.scrapingLog.create({
         data: {
-          source_name: source,
+          source_name: sources.join(","),
           status: "error",
           contests_found: 0,
           contests_processed: 0,
@@ -125,6 +183,7 @@ export const scrapingRoutes: FastifyPluginAsync = async (app) => {
           finished_at: new Date(),
         },
       });
+
       return reply.status(500).send({ success: false, error: err.message });
     }
   });

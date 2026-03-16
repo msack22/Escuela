@@ -80,7 +80,8 @@ export const contestSearchService = {
         where,
         skip,
         take: limit,
-        orderBy: { date: "asc" },
+        // Ordenamos de más recientes a más antiguos por fecha principal del concurso.
+        orderBy: { date: "desc" },
         include: { school: true, subject: true },
       }),
       prisma.contest.count({ where }),

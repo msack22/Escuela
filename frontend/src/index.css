@@ -5,7 +5,8 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f5f5f5;
+  background-color: #020617; /* slate-950 */
+  color: #e5e7eb; /* slate-200 */
 }
 
 code {

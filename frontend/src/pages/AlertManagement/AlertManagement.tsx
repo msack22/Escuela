@@ -95,23 +95,21 @@ const AlertManagement: React.FC = () => {
     form.setFieldsValue({
       user_id: undefined,
       user_name: '',
-      email_address: '',
       subject_preferences: [],
-      max_distance_km: 50,
+      departments: [],
     });
     setModalOpen(true);
   };
 
   const handleUserSelect = (userId: number | undefined) => {
     if (userId == null) {
-      form.setFieldsValue({ user_name: '', email_address: '' });
+      form.setFieldsValue({ user_name: '' });
       return;
     }
     const u = (users as any[]).find((x: any) => x.id === userId);
     if (u) {
       form.setFieldsValue({
         user_name: u.username ?? u.name ?? '',
-        email_address: u.email ?? '',
       });
     }
   };
@@ -121,9 +119,8 @@ const AlertManagement: React.FC = () => {
     form.setFieldsValue({
       user_id: record.user_id ?? undefined,
       user_name: record.user_name,
-      email_address: record.email_address ?? '',
       subject_preferences: record.subject_preferences ?? [],
-      max_distance_km: record.max_distance_km ?? 50,
+      departments: record.departments ?? [],
     });
     setModalOpen(true);
   };
@@ -136,16 +133,15 @@ const AlertManagement: React.FC = () => {
           data: {
             user_name: values.user_name,
             subject_preferences: values.subject_preferences,
-            max_distance_km: values.max_distance_km,
+            departments: values.departments,
           },
         });
       } else {
         createMutation.mutate({
           user_id: values.user_id ?? undefined,
           user_name: values.user_name,
-          email_address: values.email_address || undefined,
           subject_preferences: values.subject_preferences ?? [],
-          max_distance_km: values.max_distance_km ?? 50,
+          departments: values.departments ?? [],
         });
       }
     });
@@ -194,7 +190,13 @@ const AlertManagement: React.FC = () => {
       render: (arr: string[]) =>
         Array.isArray(arr) ? arr.map((s) => <Tag key={s}>{s}</Tag>) : '-',
     },
-    { title: 'Radio (km)', dataIndex: 'max_distance_km', key: 'max_distance_km', width: 100 },
+    {
+      title: 'Departamentos',
+      dataIndex: 'departments',
+      key: 'departments',
+      render: (arr: string[]) =>
+        Array.isArray(arr) ? arr.map((d) => <Tag key={d}>{d}</Tag>) : '-',
+    },
     {
       title: 'Acciones',
       key: 'actions',
@@ -288,9 +290,6 @@ const AlertManagement: React.FC = () => {
           <Form.Item name="user_name" label="Nombre" rules={[{ required: true }]}>
             <Input placeholder="Nombre del usuario (se rellena al elegir usuario)" />
           </Form.Item>
-          <Form.Item name="email_address" label="Email">
-            <Input type="email" placeholder="email@ejemplo.com (se rellena al elegir usuario)" />
-          </Form.Item>
           <Form.Item name="subject_preferences" label="Materias de interés">
             <Select
               mode="multiple"
@@ -298,8 +297,16 @@ const AlertManagement: React.FC = () => {
               options={subjects?.map((s: any) => ({ label: s.name, value: s.name })) ?? []}
             />
           </Form.Item>
-          <Form.Item name="max_distance_km" label="Radio máximo (km)" initialValue={50}>
-            <InputNumber min={1} max={500} style={{ width: '100%' }} />
+          <Form.Item name="departments" label="Departamentos preferidos">
+            <Select
+              mode="multiple"
+              placeholder="Todos si no elegís ninguno"
+              allowClear
+              options={(Array.isArray(departments) ? departments : []).map((d: string) => ({
+                label: d,
+                value: d,
+              }))}
+            />
           </Form.Item>
         </Form>
       </Modal>

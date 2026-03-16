@@ -21,6 +21,10 @@ export interface TestContestNotificationsBody {
   limit?: number;
 }
 
+export interface AutoNotificationContext {
+  contests: { id: number }[];
+}
+
 export async function handleTestContestNotifications(
   db: PrismaClient,
   alertId: number,

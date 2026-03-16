@@ -12,14 +12,21 @@ import {
   Modal,
   Tag,
 } from 'antd';
-import { SearchOutlined, ClearOutlined, InfoCircleOutlined } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
+import {
+  SearchOutlined,
+  ClearOutlined,
+  InfoCircleOutlined,
+  DeleteOutlined,
+  ExclamationCircleOutlined,
+} from '@ant-design/icons';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchContests,
   fetchSubjects,
   fetchCities,
   fetchDepartments,
   fetchSources,
+  deleteContest,
 } from '../../services/api';
 
 const { Title, Text } = Typography;
@@ -63,6 +70,7 @@ const getColorForCategory = (category: keyof typeof CATEGORY_COLORS, value?: str
 };
 
 const ContestList: React.FC = () => {
+  const queryClient = useQueryClient();
   const [filters, setFilters] = useState({
     title_contains: '',
     subject_ids: [] as number[],
@@ -94,6 +102,33 @@ const ContestList: React.FC = () => {
     queryFn: fetchSources,
     staleTime: 60_000,
   });
+
+  const handleDeleteContest = (contest: Contest) => {
+    Modal.confirm({
+      title: 'Eliminar concurso',
+      icon: <ExclamationCircleOutlined />,
+      content: (
+        <>
+          <p>¿Estás seguro de que querés eliminar este concurso?</p>
+          {contest.title && <p><strong>{contest.title}</strong></p>}
+          <p style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
+            Esta acción eliminará el registro de la base de datos.
+          </p>
+        </>
+      ),
+      okText: 'Sí, eliminar',
+      okType: 'danger',
+      cancelText: 'Cancelar',
+      async onOk() {
+        try {
+          await deleteContest(contest.id);
+          await queryClient.invalidateQueries({ queryKey: ['contests'] });
+        } catch (error) {
+          console.error('Error eliminando concurso', error);
+        }
+      },
+    });
+  };
 
   const columns = [
     { title: 'Título', dataIndex: 'title', key: 'title', ellipsis: true },
@@ -191,15 +226,24 @@ const ContestList: React.FC = () => {
     },
     {
       title: '',
-      key: 'info',
-      width: 64,
+      key: 'acciones',
+      width: 120,
       render: (_: unknown, r: Contest) => (
-        <Button
-          type="text"
-          icon={<InfoCircleOutlined />}
-          onClick={() => setInfoModalContest(r)}
-          title="Ver información completa"
-        />
+        <Space>
+          <Button
+            type="text"
+            icon={<InfoCircleOutlined />}
+            onClick={() => setInfoModalContest(r)}
+            title="Ver información completa"
+          />
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            title="Eliminar concurso"
+            onClick={() => handleDeleteContest(r)}
+          />
+        </Space>
       ),
     },
   ];

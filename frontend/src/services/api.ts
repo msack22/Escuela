@@ -55,6 +55,11 @@ export const fetchContestById = async (id: number) => {
   return response.data;
 };
 
+export const deleteContest = async (id: number) => {
+  await api.delete(`/api/contests/${id}`);
+  return true;
+};
+
 const DEFAULT_STATISTICS = {
   total_contests: 0,
   active_contests: 0,
@@ -294,6 +299,9 @@ const DEFAULT_SCHEDULER_STATUS = {
   next_run: null as string | null,
   job_count: 0,
   available_sources: [] as string[],
+  timezone: 'America/Argentina/Buenos_Aires',
+  scheduled_hours: [] as number[],
+  auto_sources: [] as string[],
   api_status: 'ok' as string,
 };
 
@@ -306,7 +314,7 @@ export const getSchedulerStatus = async () => {
   }
 };
 
-export const runScrapingOnce = async (data: { source?: string; force?: boolean }) => {
+export const runScrapingOnce = async (data: { source?: string; sources?: string[]; force?: boolean }) => {
   const response = await api.post('/api/scheduler/run-once', data);
   return response.data;
 };
@@ -318,6 +326,45 @@ export const getActiveJobs = async () => {
 
 export const restartScheduler = async () => {
   const response = await api.post('/api/scheduler/restart');
+  return response.data;
+};
+
+export const getSchedulerConfig = async () => {
+  const response = await api.get('/api/scheduler/config');
+  return response.data as {
+    timezone: string;
+    scheduled_hours: number[];
+    auto_sources: string[];
+  };
+};
+
+export const updateSchedulerConfig = async (data: {
+  scheduled_hours?: number[];
+  auto_sources?: string[];
+}) => {
+  const response = await api.post('/api/scheduler/config', data);
+  return response.data as {
+    timezone: string;
+    scheduled_hours: number[];
+    auto_sources: string[];
+  };
+};
+
+export interface SchedulerHistoryRun {
+  started_at: string;
+  finished_at: string;
+  timezone: string;
+  hour_ar: number;
+  sources: string[];
+  total_contests: number;
+  cgeCount: number;
+  facebookCount: number;
+}
+
+export const getSchedulerHistory = async (limit: number = 20) => {
+  const response = await api.get<{ runs: SchedulerHistoryRun[] }>(
+    `/api/scheduler/history?limit=${limit}`,
+  );
   return response.data;
 };
 
@@ -382,11 +429,15 @@ export const triggerManualScraping = async (source?: string) => {
   return response.data;
 };
 
-export const runManualScraping = async (sourceName?: string) => {
-  const params = sourceName ? { source_name: sourceName } : {};
-  const response = await api.post('/api/scraping/run', null, { 
-    params,
-    timeout: 120000 // 2 minutes timeout for scraping operations
+export const runManualScraping = async (sources?: string | string[]) => {
+  const body = Array.isArray(sources)
+    ? { sources }
+    : sources
+      ? { source: sources }
+      : {};
+
+  const response = await api.post('/api/scraping/run', body, {
+    timeout: 120000, // 2 minutes timeout for scraping operations
   });
   return response.data;
 };

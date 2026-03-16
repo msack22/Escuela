@@ -5,6 +5,15 @@ const LEVELS = ["Inicial", "Primaria", "Secundaria", "Jardín"];
 const SHIFTS = ["Mañana", "Tarde", "Jornada Completa", "Vespertina", "Nocturna"];
 const CONTRACT_TYPES = ["Titular", "Suplente", "Interino", "Contratado", "Temporario", "Reemplazo", "Carga Horaria"];
 
+function normalizeMultiParam(value?: string | string[]): string[] {
+  if (!value) return [];
+  const raw = Array.isArray(value) ? value : [value];
+  return raw
+    .flatMap((v) => String(v).split(","))
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 export const contestsRoutes: FastifyPluginAsync = async (app) => {
   // DELETE /api/contests/clear
   app.delete("/clear", async (req, reply) => {
@@ -32,11 +41,11 @@ export const contestsRoutes: FastifyPluginAsync = async (app) => {
       limit?: string;
       date_from?: string;
       date_to?: string;
-      departments?: string;
+      departments?: string | string[];
       subject_id?: string;
-      subject_ids?: string;
+      subject_ids?: string | string[];
       city?: string;
-      cities?: string;
+      cities?: string | string[];
       department?: string;
       level?: string;
       shift?: string;
@@ -52,16 +61,23 @@ export const contestsRoutes: FastifyPluginAsync = async (app) => {
     const q = req.query;
     const skip = Math.max(0, parseInt(q.skip ?? "0", 10) || 0);
     const limit = Math.min(1000, Math.max(1, parseInt(q.limit ?? "100", 10) || 100));
+
+    const departmentsList = normalizeMultiParam(q.departments);
+    const citiesList = normalizeMultiParam(q.cities);
+    const subjectIdsList = normalizeMultiParam(q.subject_ids)
+      .map((s) => parseInt(s, 10))
+      .filter((n) => !Number.isNaN(n));
+
     const result = await contestSearchService.search({
       skip,
       limit,
       dateFrom: q.date_from ? new Date(q.date_from) : undefined,
       dateTo: q.date_to ? new Date(q.date_to) : undefined,
-      departments: q.departments ? q.departments.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
+      departments: departmentsList.length ? departmentsList : undefined,
       subjectId: q.subject_id != null ? parseInt(q.subject_id, 10) : undefined,
-      subjectIds: q.subject_ids ? q.subject_ids.split(",").map((s) => parseInt(s, 10)).filter((n) => !Number.isNaN(n)) : undefined,
+      subjectIds: subjectIdsList.length ? subjectIdsList : undefined,
       city: q.city || undefined,
-      cities: q.cities ? q.cities.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
+      cities: citiesList.length ? citiesList : undefined,
       department: q.department || undefined,
       level: q.level || undefined,
       shift: q.shift || undefined,
@@ -83,5 +99,19 @@ export const contestsRoutes: FastifyPluginAsync = async (app) => {
     const contest = await contestSearchService.getContestById(id);
     if (!contest) return reply.status(404).send({ detail: "Contest not found" });
     return contest;
+  });
+
+  // DELETE /api/contests/:contest_id - eliminar un concurso puntual
+  app.delete<{ Params: { contest_id: string } }>("/:contest_id", async (req, reply) => {
+    const id = parseInt(req.params.contest_id, 10);
+    if (Number.isNaN(id)) return reply.status(400).send({ detail: "Invalid contest id" });
+
+    try {
+      await req.server.prisma.contest.delete({ where: { id } });
+      return reply.status(204).send();
+    } catch (e) {
+      // Si no existe, Prisma lanza un error; respondemos 404 genérico
+      return reply.status(404).send({ detail: "Contest not found or already deleted" });
+    }
   });
 };

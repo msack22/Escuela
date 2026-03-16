@@ -53,10 +53,9 @@ const Navbar: React.FC = () => {
   const menuItems = [
     { label: 'Dashboard', icon: <DashboardOutlined />, path: '/' },
     { label: 'Concursos', icon: <OrderedListOutlined />, path: '/contests' },
-    { label: 'Capacitaciones', icon: <ReadOutlined />, path: '/capacitaciones' },
+    // { label: 'Capacitaciones', icon: <ReadOutlined />, path: '/capacitaciones' },
     { label: 'Alertas', icon: <NotificationOutlined />, path: '/alerts' },
     { label: 'Usuarios', icon: <TeamOutlined />, path: '/users' },
-    { label: 'Scheduler', icon: <ScheduleOutlined />, path: '/scheduler' },
     { label: 'Scraping', icon: <SettingOutlined />, path: '/scraping' },
   ];
 
@@ -67,12 +66,12 @@ const Navbar: React.FC = () => {
   const showProgressBar = progress?.running === true;
 
   return (
-    <Header style={{ padding: 0, height: 64, position: 'relative' }}>
+    <Header style={{ padding: 0, height: 64, lineHeight: '64px', background: '#030712' }}>
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          minHeight: 64,
+          height: 64,
           width: '100%',
         }}
       >
@@ -92,55 +91,35 @@ const Navbar: React.FC = () => {
             icon: item.icon,
             label: item.label,
           }))}
-          style={{ flex: 1, minWidth: 0 }}
+          style={{ flex: 1, minWidth: 0, borderBottom: 'none' }}
         />
-        {/* Barra de progreso superpuesta a la derecha (no ocupa espacio, no rompe el menú) */}
         {showProgressBar && (
           <div
             style={{
-              position: 'absolute',
-              right: 0,
-              top: 0,
-              bottom: 0,
               display: 'flex',
               alignItems: 'center',
-              paddingLeft: 24,
-              paddingRight: 24,
-              maxWidth: 320,
-              minWidth: 260,
-              background: 'linear-gradient(to left, rgba(0,21,41,0.97) 0%, rgba(0,21,41,0.85) 70%, transparent 100%)',
-              pointerEvents: 'none',
-              zIndex: 1,
+              padding: '0 24px',
+              height: '100%',
+              flexShrink: 0,
+              gap: 8,
             }}
           >
-            <Space direction="vertical" size={0} style={{ width: '100%' }}>
-              <Space size="small" style={{ marginBottom: 2 }}>
+            <Space direction="vertical" size={2}>
+              <Space size="small">
                 <LoadingOutlined style={{ color: '#69b1ff' }} />
-                <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 12 }}>
-                  {progress?.step || 'Scraping...'}
+                <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: 500 }}>
+                  {progress.step || 'Scraping en progreso...'}
                 </Text>
-                {typeof progress?.percentage === 'number' && (
-                  <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12 }}>
-                    {progress.percentage}%
-                  </Text>
-                )}
-                {progress?.items_found != null && (
-                  <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12 }}>
-                    {progress.items_found} encontrados
-                  </Text>
-                )}
               </Space>
-              <Progress
-                percent={
-                  typeof progress?.percentage === 'number'
-                    ? progress.percentage
-                    : undefined
-                }
-                status="active"
-                showInfo={false}
-                strokeColor="#69b1ff"
-                style={{ marginBottom: 0 }}
-              />
+              {typeof progress.percentage === 'number' && (
+                <Progress
+                  percent={progress.percentage}
+                  size="small"
+                  showInfo
+                  strokeColor="#69b1ff"
+                  style={{ marginBottom: 0, minWidth: 160 }}
+                />
+              )}
             </Space>
           </div>
         )}
