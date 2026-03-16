@@ -28,6 +28,46 @@ export const scrapingRoutes: FastifyPluginAsync = async (app) => {
     return { running: false, step: "", percentage: null, source: null };
   });
 
+  // Endpoint SSE compatible con el backend Python: /api/scraping/progress/stream
+  app.get("/progress/stream", async (req, reply) => {
+    // Headers SSE
+    reply.raw.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "Access-Control-Allow-Origin": "*",
+    });
+
+    const send = () => {
+      const cycle = schedulerService.getCycleProgress();
+      const payload = cycle.running
+        ? {
+            running: true,
+            source: cycle.source ?? "scheduler",
+            step: cycle.step ?? "Scraping...",
+            percentage: cycle.percentage,
+            current: cycle.current,
+            total: cycle.total,
+          }
+        : {
+            running: false,
+            step: "",
+            percentage: null,
+            source: null,
+          };
+      reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    // Enviar inmediatamente un estado inicial
+    send();
+    const interval = setInterval(send, 2000);
+
+    req.raw.on("close", () => {
+      clearInterval(interval);
+      reply.raw.end();
+    });
+  });
+
   app.get<{ Querystring: { limit?: string } }>("/logs", async (req) => {
     const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit ?? "50", 10) || 50));
     const logs = await req.server.prisma.scrapingLog.findMany({ take: limit, orderBy: { started_at: "desc" } });

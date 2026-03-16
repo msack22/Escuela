@@ -103,7 +103,7 @@ export const alertMetaRoutes: FastifyPluginAsync = async (app) => {
       ? `Email de prueba enviado a ${email} con ${contests.length} concurso(s).`
       : !isEmailConfigured()
         ? "Email no configurado. Revisar .env (SENDER_EMAIL, BREVO_API_KEY o SENDGRID_API_KEY)."
-        : "No se pudo enviar el email. Revisar .env y logs.";
+        : "No se pudo enviar el email. Revisar backend/.env y backend/logs/email.log para ver el error (Brevo/SendGrid).";
 
     return {
       success: sent,

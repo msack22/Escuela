@@ -1,9 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import fs from "fs";
-import path from "path";
-
-const LOG_DIR = path.join(process.cwd(), "logs", "frontend");
-const LOG_FILE = path.join(LOG_DIR, "frontend.log");
+import { getFrontendLogPath } from "../lib/logger.js";
 
 export const logsRoutes: FastifyPluginAsync = async (app) => {
   app.post<{
@@ -14,7 +11,7 @@ export const logsRoutes: FastifyPluginAsync = async (app) => {
   }>("/frontend", async (req, reply) => {
     try {
       if (!req.body.logs?.length) return { success: true, message: "No logs to save" };
-      if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+      const LOG_FILE = getFrontendLogPath();
       const line = req.body.logs
         .map(
           (l) =>
@@ -28,13 +25,13 @@ export const logsRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
-  app.get("/frontend/status", async () => ({
-    enabled: true,
-    log_file: LOG_FILE,
-    exists: fs.existsSync(LOG_FILE),
-  }));
+  app.get("/frontend/status", async () => {
+    const LOG_FILE = getFrontendLogPath();
+    return { enabled: true, log_file: LOG_FILE, exists: fs.existsSync(LOG_FILE) };
+  });
 
   app.get("/frontend/recent", async (req, reply) => {
+    const LOG_FILE = getFrontendLogPath();
     if (!fs.existsSync(LOG_FILE)) return { lines: [] };
     try {
       const content = fs.readFileSync(LOG_FILE, "utf-8");
@@ -47,6 +44,7 @@ export const logsRoutes: FastifyPluginAsync = async (app) => {
 
   app.delete("/frontend", async (req, reply) => {
     try {
+      const LOG_FILE = getFrontendLogPath();
       if (fs.existsSync(LOG_FILE)) fs.unlinkSync(LOG_FILE);
       return { success: true };
     } catch (e) {

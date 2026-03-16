@@ -1,14 +1,22 @@
-import "dotenv/config";
+import path from "path";
+import { fileURLToPath } from "url";
+import { config as loadEnv } from "dotenv";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const BACKEND_DIR = path.resolve(__dirname, "..");
+const ENV_PATH = path.join(BACKEND_DIR, ".env");
+loadEnv({ path: ENV_PATH });
+
 import { z } from "zod";
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   PORT: z.coerce.number().default(8000),
   HOST: z.string().default("0.0.0.0"),
-  SENDER_EMAIL: z.string().optional().default(""),
-  BREVO_API_KEY: z.string().optional().default(""),
-  SENDGRID_API_KEY: z.string().optional().default(""),
-  SENDER_PASSWORD: z.string().optional().default(""),
+  SENDER_EMAIL: z.string().optional().default("").transform((s) => (s || "").trim()),
+  BREVO_API_KEY: z.string().optional().default("").transform((s) => (s || "").trim()),
+  SENDGRID_API_KEY: z.string().optional().default("").transform((s) => (s || "").trim()),
+  SENDER_PASSWORD: z.string().optional().default("").transform((s) => (s || "").trim()),
   SCRAPING_TIMEOUT_MS: z.coerce.number().default(60000),
   /** "playwright" | "puppeteer" cuando se usa navegador */
   SCRAPING_ENGINE: z.enum(["playwright", "puppeteer"]).default("playwright"),

@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { contestSearchService } from "./contest-search.service.js";
 import { emailNotifier } from "../infrastructure/email-notifier.js";
 import { isEmailConfigured } from "../config.js";
+import { sendWhatsappMessage } from "../infrastructure/whatsapp-web-notifier.js";
 
 function escapeHtml(s: string): string {
   return s
@@ -29,6 +30,7 @@ export async function handleTestContestNotifications(
   if (!alert) return { error: "Alert not found", statusCode: 404 };
   const email = (alert.email_address ?? "").trim();
   if (!email) return { error: "La alerta no tiene email", statusCode: 400 };
+  const whatsapp = (alert.whatsapp_number ?? "").trim();
 
   const result = await contestSearchService.search({
     skip: 0,
@@ -56,11 +58,6 @@ export async function handleTestContestNotifications(
     )
     .join("");
 
-  let sent = false;
-  if (isEmailConfigured()) {
-    sent = await emailNotifier.send({ to: email, subject, html });
-  }
-
   const filtersSummary = [
     date_from && `Desde: ${date_from}`,
     date_to && `Hasta: ${date_to}`,
@@ -70,11 +67,22 @@ export async function handleTestContestNotifications(
     .filter(Boolean)
     .join("; ");
 
+  // Aviso previo por WhatsApp (si hay número configurado)
+  if (whatsapp) {
+    const preview = `Te vamos a enviar un correo de prueba a ${email} con ${contests.length} concurso(s).\nAsunto: ${subject}.\nFiltros: ${filtersSummary || "sin filtros"}. (número alerta: ${whatsapp})`;
+    await sendWhatsappMessage(whatsapp, preview);
+  }
+
+  let sent = false;
+  if (isEmailConfigured()) {
+    sent = await emailNotifier.send({ to: email, subject, html });
+  }
+
   const message = sent
     ? `Email de prueba enviado a ${email} con ${contests.length} concurso(s).`
     : !isEmailConfigured()
-      ? "Email no configurado. Revisar .env (SENDER_EMAIL, BREVO_API_KEY o SENDGRID_API_KEY)."
-      : "No se pudo enviar el email. Revisar .env y logs.";
+      ? "Email no configurado. Revisar backend/.env (SENDER_EMAIL, BREVO_API_KEY o SENDGRID_API_KEY) y backend/logs/email.log."
+      : "No se pudo enviar el email. Revisar backend/.env y backend/logs/email.log para ver el error (Brevo/SendGrid).";
 
   return {
     success: sent,

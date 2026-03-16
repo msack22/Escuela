@@ -9,8 +9,8 @@ import App from './App';
 import { store } from './store/store';
 import './index.css';
 
-// Importar el logger simple (comentado temporalmente)
-// import './utils/simpleLogger.js';
+import { initFrontendLogger } from "./utils/frontendLogger";
+initFrontendLogger();
 
 // Create a client for TanStack Query v5 - minimal configuration
 const queryClient = new QueryClient();
