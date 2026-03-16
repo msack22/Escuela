@@ -30,15 +30,29 @@ export const alertsRoutes: FastifyPluginAsync = async (app) => {
     };
   }>("/", async (req, reply) => {
     const body = req.body;
+    let userName = body.user_name ?? "Sin nombre";
+    let emailAddress = body.email_address ?? null;
+    let whatsappNumber = (body.whatsapp_number ?? "").trim();
+
+    if (body.user_id) {
+      const user = await req.server.prisma.user.findUnique({ where: { id: body.user_id } });
+      if (user) {
+        userName = userName === "Sin nombre" ? user.name : userName;
+        emailAddress = emailAddress ?? user.email;
+        if (!whatsappNumber && user.phone_number) {
+          whatsappNumber = user.phone_number.trim();
+        }
+      }
+    }
     const prefs = body.subject_preferences;
     const subjectPreferences =
       typeof prefs === "string" ? prefs : Array.isArray(prefs) ? JSON.stringify(prefs) : "[]";
     const alert = await req.server.prisma.alert.create({
       data: {
         user_id: body.user_id ?? null,
-        user_name: body.user_name ?? "Sin nombre",
-        email_address: body.email_address ?? null,
-        whatsapp_number: (body.whatsapp_number ?? "").trim(),
+        user_name: userName,
+        email_address: emailAddress,
+        whatsapp_number: whatsappNumber,
         subject_preferences: subjectPreferences,
         max_distance_km: body.max_distance_km ?? 50,
         notification_channels: body.notification_channels ?? "both",

@@ -3,6 +3,7 @@ import { contestSearchService } from "./contest-search.service.js";
 import { emailNotifier } from "../infrastructure/email-notifier.js";
 import { isEmailConfigured } from "../config.js";
 import { sendWhatsappMessage } from "../infrastructure/whatsapp-web-notifier.js";
+import { appLogger } from "../lib/logger.js";
 
 function escapeHtml(s: string): string {
   return s
@@ -28,9 +29,21 @@ export async function handleTestContestNotifications(
   const { date_from, date_to, departments, subject_ids, limit = 10 } = body;
   const alert = await db.alert.findUnique({ where: { id: alertId } });
   if (!alert) return { error: "Alert not found", statusCode: 404 };
-  const email = (alert.email_address ?? "").trim();
-  if (!email) return { error: "La alerta no tiene email", statusCode: 400 };
-  const whatsapp = (alert.whatsapp_number ?? "").trim();
+  const user = alert.user_id ? await db.user.findUnique({ where: { id: alert.user_id } }) : null;
+  const email = ((alert.email_address || user?.email) ?? "").trim();
+  if (!email) return { error: "La alerta no tiene email ni usuario asociado con email", statusCode: 400 };
+  const whatsapp = ((alert.whatsapp_number || user?.phone_number) ?? "").trim();
+
+  appLogger.info("TestContestNotifications datos", {
+    alertId,
+    userId: alert.user_id,
+    email_from_alert: alert.email_address,
+    email_from_user: user?.email,
+    whatsapp_from_alert: alert.whatsapp_number,
+    whatsapp_from_user: user?.phone_number,
+    email,
+    whatsapp,
+  });
 
   const result = await contestSearchService.search({
     skip: 0,

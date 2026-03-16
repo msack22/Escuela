@@ -10,6 +10,7 @@ import {
   Space,
   Select,
   Modal,
+  Tag,
 } from 'antd';
 import { SearchOutlined, ClearOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
@@ -41,6 +42,25 @@ interface Contest {
   contract_type?: string;
   is_active?: boolean;
 }
+
+// Colores consistentes por categoría para ayudar a agrupar visualmente
+const CATEGORY_COLORS: Record<string, string[]> = {
+  subject: ['magenta', 'volcano', 'blue', 'geekblue', 'purple', 'cyan', 'gold', 'lime'],
+  city: ['green', 'blue', 'cyan', 'geekblue', 'purple'],
+  department: ['orange', 'volcano', 'gold', 'magenta', 'red'],
+  source: ['geekblue', 'purple', 'cyan', 'gold', 'green'],
+};
+
+const getColorForCategory = (category: keyof typeof CATEGORY_COLORS, value?: string) => {
+  if (!value) return undefined;
+  const palette = CATEGORY_COLORS[category] || ['blue'];
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+  const index = hash % palette.length;
+  return palette[index];
+};
 
 const ContestList: React.FC = () => {
   const [filters, setFilters] = useState({
@@ -82,18 +102,42 @@ const ContestList: React.FC = () => {
       key: 'city',
       dataIndex: ['school', 'city'],
       width: 120,
+      render: (v: string | undefined) =>
+        v ? (
+          <Tag color={getColorForCategory('city', v)} style={{ borderRadius: 999 }}>
+            {v}
+          </Tag>
+        ) : (
+          '—'
+        ),
     },
     {
       title: 'Departamento',
       key: 'department',
       dataIndex: ['school', 'department'],
       width: 140,
+      render: (v: string | undefined) =>
+        v ? (
+          <Tag color={getColorForCategory('department', v)} style={{ borderRadius: 999 }}>
+            {v}
+          </Tag>
+        ) : (
+          '—'
+        ),
     },
     {
       title: 'Materia',
       key: 'subject',
       dataIndex: ['subject', 'name'],
       width: 140,
+      render: (v: string | undefined) =>
+        v ? (
+          <Tag color={getColorForCategory('subject', v)} style={{ borderRadius: 999 }}>
+            {v}
+          </Tag>
+        ) : (
+          '—'
+        ),
     },
     {
       title: 'Fecha publicación',
@@ -114,11 +158,23 @@ const ContestList: React.FC = () => {
       key: 'source',
       width: 180,
       ellipsis: true,
-      render: (_: unknown, r: Contest) => (
-        <span title={r.source?.name ?? ''}>
-          {r.source?.name ?? '—'}
-        </span>
-      ),
+      render: (_: unknown, r: Contest) =>
+        r.source?.name ? (
+          <Tag
+            color={getColorForCategory('source', r.source?.name)}
+            style={{ borderRadius: 999, maxWidth: 160 }}
+            title={r.source?.name}
+          >
+            <span
+              style={{ maxWidth: 140, display: 'inline-block' }}
+              className="text-ellipsis overflow-hidden whitespace-nowrap"
+            >
+              {r.source?.name}
+            </span>
+          </Tag>
+        ) : (
+          '—'
+        ),
     },
     {
       title: 'Link',

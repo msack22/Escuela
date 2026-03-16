@@ -68,15 +68,34 @@ function initClient(): Promise<void> {
 }
 
 function normalizeNumber(raw: string): string {
+  // Quitar todo lo que no sea dígito (espacios, guiones, paréntesis, etc.)
   const cleaned = raw.replace(/\D/g, "");
   if (!cleaned) return cleaned;
+
   let n = cleaned;
+
+  // Quitar prefijo internacional 00
   if (n.startsWith("00")) n = n.slice(2);
-  // Quitar ceros iniciales típicos de prefijo local
+
+  // Quitar ceros locales al inicio (0, 011, etc.)
   n = n.replace(/^0+/, "");
-  if (!n.startsWith("54")) {
-    n = "54" + n;
+
+  // Si ya viene con 549 (Argentina + móvil), lo dejamos
+  if (n.startsWith("549")) {
+    return n;
   }
+
+  // Si viene con 54 y luego el código de área sin 9 (ej: 54 344...), insertamos el 9
+  if (n.startsWith("54") && !n.startsWith("549")) {
+    const rest = n.slice(2); // después de 54
+    return "549" + rest;
+  }
+
+  // Si no tiene 54, asumimos número argentino y agregamos 549 al inicio
+  if (!n.startsWith("54")) {
+    return "549" + n;
+  }
+
   return n;
 }
 
@@ -94,7 +113,35 @@ export async function sendWhatsappMessage(toRaw: string, text: string): Promise<
     appLogger.info("WhatsApp enviado OK", { to: jid });
     return true;
   } catch (e) {
-    appLogger.error("Error enviando WhatsApp", { error: (e as Error).message });
+    const msg = (e as Error).message || "";
+    appLogger.error("Error enviando WhatsApp", { error: msg });
+
+    // Si el frame de WhatsApp quedó roto, reiniciar cliente y reintentar una sola vez
+    if (msg.includes("detached Frame")) {
+      appLogger.warn("Frame de WhatsApp roto, reintentando con nuevo navegador");
+      try {
+        ready = false;
+        initializing = false;
+        client = null;
+        await initClient();
+        if (!client || !ready) {
+          appLogger.error("WhatsApp Web no está listo después del reintento");
+          return false;
+        }
+        const normalized = normalizeNumber(toRaw);
+        const jid = normalized + "@c.us";
+        appLogger.info("Enviando WhatsApp (reintento)", { to: jid, text: text.slice(0, 100) });
+        await client.sendMessage(jid, text);
+        appLogger.info("WhatsApp enviado OK tras reintento", { to: jid });
+        return true;
+      } catch (e2) {
+        appLogger.error("Error enviando WhatsApp tras reintento", {
+          error: (e2 as Error).message,
+        });
+        return false;
+      }
+    }
+
     return false;
   }
 }

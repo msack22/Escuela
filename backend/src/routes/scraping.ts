@@ -1,11 +1,16 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import { runCgeScraper } from "../scrapers/cge-scraper.js";
+import { runFacebookCgeScraper } from "../scrapers/facebook-cge-scraper.js";
 import { schedulerService } from "../services/scheduler.service.js";
 
 async function runScraperBySource(prisma: PrismaClient, source: string): Promise<{ count: number; success: boolean; error?: string }> {
   if (source === "cge_simple" || source === "cge_enterios_completo") {
     const count = await runCgeScraper(prisma);
+    return { count, success: true };
+  }
+  if (source === "facebook_cge") {
+    const count = await runFacebookCgeScraper(prisma);
     return { count, success: true };
   }
   if (source === "datos_abiertos_argentina" || source === "puntos_digitales") {
