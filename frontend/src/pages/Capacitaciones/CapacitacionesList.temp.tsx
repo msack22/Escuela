@@ -1,13 +1,13 @@
 import React from 'react';
-import { Typography } from '@mui/material';
+import { Typography } from 'antd';
 
-const CapacitacionesList: React.FC<any> = (props) => {
+const CapacitacionesListTemp: React.FC = () => {
   return (
     <div>
-      <Typography variant="h4">Capacitaciones List (Temp)</Typography>
-      <pre>{JSON.stringify(props, null, 2)}</pre>
+      <Typography.Title level={3}>Capacitaciones (temp)</Typography.Title>
+      <Typography.Text type="secondary">Pantalla en migración a Ant Design</Typography.Text>
     </div>
   );
 };
 
-export default CapacitacionesList;
+export default CapacitacionesListTemp;

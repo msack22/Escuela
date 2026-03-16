@@ -1,76 +1,77 @@
 import React, { useState } from 'react';
 import {
-  Box,
-  Card,
-  CardContent,
+  Table,
   Typography,
   Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Chip,
-  IconButton,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Space,
+  Tag,
+  Popconfirm,
   Alert,
-  CircularProgress,
-  Grid,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemSecondaryAction,
-} from '@mui/material';
-import {
-  Add as AddIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
-  NotificationsActive as NotificationIcon,
-  Send as SendIcon,
-} from '@mui/icons-material';
+  Spin,
+  Select,
+  DatePicker,
+} from 'antd';
+import { PlusOutlined, BellOutlined } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-
 import {
   fetchAlerts,
   createAlert,
   updateAlert,
   deleteAlert,
-  sendTestNotification,
   fetchSubjects,
+  fetchUsers,
+  fetchDepartments,
+  fetchAlertNotificationInfo,
+  sendTestContestNotifications,
 } from '../../services/api';
 
-const AlertManagement: React.FC = () => {
-  const [openDialog, setOpenDialog] = useState(false);
-  const [editingAlert, setEditingAlert] = useState<any>(null);
-  const [testNotificationOpen, setTestNotificationOpen] = useState(false);
-  const [testPhoneNumber, setTestPhoneNumber] = useState('');
-  const [formData, setFormData] = useState({
-    user_name: '',
-    whatsapp_number: '',
-    subject_preferences: [] as string[],
-    max_distance_km: 50,
-  });
+const { Title, Paragraph } = Typography;
 
+const AlertManagement: React.FC = () => {
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [testModalOpen, setTestModalOpen] = useState(false);
+  const [testAlertId, setTestAlertId] = useState<number | null>(null);
+  const [form] = Form.useForm();
+  const [testForm] = Form.useForm();
   const queryClient = useQueryClient();
 
-  const { data: alerts, isPending } = useQuery({
+  const { data: alerts = [], isLoading, error } = useQuery({
     queryKey: ['alerts'],
     queryFn: fetchAlerts,
   });
-  const { data: subjects } = useQuery({
+
+  const { data: subjects = [] } = useQuery({
     queryKey: ['subjects'],
     queryFn: fetchSubjects,
   });
 
+  const { data: users = [] } = useQuery({
+    queryKey: ['users'],
+    queryFn: fetchUsers,
+  });
+
+  const { data: departments = [] } = useQuery({
+    queryKey: ['departments'],
+    queryFn: fetchDepartments,
+  });
+
+  const { data: notificationInfo } = useQuery({
+    queryKey: ['alert-notification-info'],
+    queryFn: fetchAlertNotificationInfo,
+  });
+
   const createMutation = useMutation({
-    mutationFn: createAlert,
+    mutationFn: (data: any) => createAlert(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['alerts'] });
-      setOpenDialog(false);
-      resetForm();
+      setModalOpen(false);
+      form.resetFields();
     },
   });
 
@@ -78,256 +79,272 @@ const AlertManagement: React.FC = () => {
     mutationFn: ({ id, data }: { id: number; data: any }) => updateAlert(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['alerts'] });
-      setOpenDialog(false);
-      resetForm();
+      setModalOpen(false);
+      setEditingId(null);
+      form.resetFields();
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: deleteAlert,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['alerts'] });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['alerts'] }),
   });
 
-  const testNotificationMutation = useMutation({
-    mutationFn: sendTestNotification,
-    onSuccess: (data) => {
-      alert(data.message || 'Notificación de prueba enviada');
-      setTestNotificationOpen(false);
-      setTestPhoneNumber('');
-    },
-    onError: (error: any) => {
-      alert(error.response?.data?.detail || 'Error al enviar notificación de prueba');
-    },
-  });
-
-  const resetForm = () => {
-    setFormData({
+  const handleOpenCreate = () => {
+    setEditingId(null);
+    form.setFieldsValue({
+      user_id: undefined,
       user_name: '',
-      whatsapp_number: '',
+      email_address: '',
       subject_preferences: [],
       max_distance_km: 50,
     });
-    setEditingAlert(null);
+    setModalOpen(true);
   };
 
-  const handleOpenDialog = (alert?: any) => {
-    if (alert) {
-      setFormData({
-        user_name: alert.user_name,
-        whatsapp_number: alert.whatsapp_number,
-        subject_preferences: JSON.parse(alert.subject_preferences || '[]'),
-        max_distance_km: alert.max_distance_km,
-      });
-      setEditingAlert(alert);
-    } else {
-      resetForm();
+  const handleUserSelect = (userId: number | undefined) => {
+    if (userId == null) {
+      form.setFieldsValue({ user_name: '', email_address: '' });
+      return;
     }
-    setOpenDialog(true);
+    const u = (users as any[]).find((x: any) => x.id === userId);
+    if (u) {
+      form.setFieldsValue({
+        user_name: u.username ?? u.name ?? '',
+        email_address: u.email ?? '',
+      });
+    }
+  };
+
+  const handleOpenEdit = (record: any) => {
+    setEditingId(record.id);
+    form.setFieldsValue({
+      user_id: record.user_id ?? undefined,
+      user_name: record.user_name,
+      email_address: record.email_address ?? '',
+      subject_preferences: record.subject_preferences ?? [],
+      max_distance_km: record.max_distance_km ?? 50,
+    });
+    setModalOpen(true);
   };
 
   const handleSubmit = () => {
-    if (editingAlert) {
-      updateMutation.mutate({ id: editingAlert.id, data: formData });
-    } else {
-      createMutation.mutate(formData);
-    }
+    form.validateFields().then((values) => {
+      if (editingId != null) {
+        updateMutation.mutate({
+          id: editingId,
+          data: {
+            user_name: values.user_name,
+            subject_preferences: values.subject_preferences,
+            max_distance_km: values.max_distance_km,
+          },
+        });
+      } else {
+        createMutation.mutate({
+          user_id: values.user_id ?? undefined,
+          user_name: values.user_name,
+          email_address: values.email_address || undefined,
+          subject_preferences: values.subject_preferences ?? [],
+          max_distance_km: values.max_distance_km ?? 50,
+        });
+      }
+    });
   };
 
-  const handleDeleteAlert = (id: number) => {
-    if (window.confirm('¿Estás seguro de que quieres eliminar esta alerta?')) {
-      deleteMutation.mutate(id);
-    }
+  const openTestModal = (record: any) => {
+    setTestAlertId(record.id);
+    testForm.setFieldsValue({
+      date_from: undefined,
+      date_to: undefined,
+      departments: undefined,
+      subject_ids: undefined,
+      limit: 50,
+    });
+    setTestModalOpen(true);
   };
 
-  const handleSendTestNotification = () => {
-    if (!testPhoneNumber) {
-      alert('Por favor ingresa un número de WhatsApp');
-      return;
-    }
-    testNotificationMutation.mutate(testPhoneNumber);
+  const handleSendTestNotifications = () => {
+    if (testAlertId == null) return;
+    testForm.validateFields().then((values) => {
+      const params: any = { limit: values.limit ?? 50 };
+      if (values.date_from) params.date_from = dayjs(values.date_from).format('YYYY-MM-DD');
+      if (values.date_to) params.date_to = dayjs(values.date_to).format('YYYY-MM-DD');
+      if (values.departments?.length) params.departments = values.departments;
+      if (values.subject_ids?.length) params.subject_ids = values.subject_ids;
+      sendTestContestNotifications(testAlertId, params)
+        .then((res) => {
+          if (res.success) {
+            setTestModalOpen(false);
+            testForm.resetFields();
+          }
+          alert(res.message || (res.success ? 'Enviado.' : res.error));
+        })
+        .catch((err) => alert(err?.response?.data?.detail || err?.message || 'Error al enviar.'));
+    });
   };
+
+  const columns = [
+    { title: 'ID', dataIndex: 'id', key: 'id', width: 70 },
+    { title: 'Usuario (ID)', dataIndex: 'user_id', key: 'user_id', width: 90, render: (v: number) => v ?? '-' },
+    { title: 'Nombre', dataIndex: 'user_name', key: 'user_name' },
+    {
+      title: 'Materias',
+      dataIndex: 'subject_preferences',
+      key: 'subject_preferences',
+      render: (arr: string[]) =>
+        Array.isArray(arr) ? arr.map((s) => <Tag key={s}>{s}</Tag>) : '-',
+    },
+    { title: 'Radio (km)', dataIndex: 'max_distance_km', key: 'max_distance_km', width: 100 },
+    {
+      title: 'Acciones',
+      key: 'actions',
+      width: 260,
+      render: (_: any, record: any) => (
+        <Space>
+          <Button type="link" size="small" onClick={() => handleOpenEdit(record)}>
+            Editar
+          </Button>
+          <Button type="link" size="small" onClick={() => openTestModal(record)}>
+            Probar notificaciones
+          </Button>
+          <Popconfirm
+            title="¿Desactivar esta alerta?"
+            onConfirm={() => deleteMutation.mutate(record.id)}
+          >
+            <Button type="link" danger size="small">
+              Desactivar
+            </Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
+
+  if (error) {
+    return (
+      <Alert type="error" title="Error al cargar alertas" description={(error as Error)?.message} />
+    );
+  }
 
   return (
-    <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Gestión de Alertas</Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => handleOpenDialog()}
-        >
-          Nueva Alerta
-        </Button>
-      </Box>
+    <div>
+      <Title level={3} style={{ marginBottom: 24 }}>
+        Gestión de alertas
+      </Title>
 
-      {/* Alert Cards */}
-      <Grid container spacing={3}>
-        {alerts?.map((alert: any) => (
-          <Grid item xs={12} md={6} lg={4} key={alert.id}>
-            <Card>
-              <CardContent>
-                <Box display="flex" justifyContent="space-between" alignItems="start" mb={2}>
-                  <Typography variant="h6">{alert.user_name}</Typography>
-                  <Box>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleOpenDialog(alert)}
-                    >
-                      <EditIcon />
-                    </IconButton>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleDeleteAlert(alert.id)}
-                    >
-                      <DeleteIcon />
-                    </IconButton>
-                  </Box>
-                </Box>
+      {notificationInfo?.when_sent && (
+        <Alert
+          type="info"
+          showIcon
+          icon={<BellOutlined />}
+          message="¿Cuándo me llegan las notificaciones?"
+          description={
+            <>
+              <Paragraph style={{ marginBottom: 0 }}>{notificationInfo.when_sent}</Paragraph>
+              {notificationInfo.how_to_trigger && (
+                <Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
+                  {notificationInfo.how_to_trigger}
+                </Paragraph>
+              )}
+            </>
+          }
+          style={{ marginBottom: 16 }}
+        />
+      )}
 
-                <Typography variant="body2" color="textSecondary" gutterBottom>
-                  {alert.whatsapp_number}
-                </Typography>
+      <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate} style={{ marginBottom: 16 }}>
+        Nueva alerta
+      </Button>
 
-                <Box mb={2}>
-                  <Typography variant="body2" gutterBottom>
-                    Materías preferidas:
-                  </Typography>
-                  <Box display="flex" flexWrap="wrap" gap={1}>
-                    {JSON.parse(alert.subject_preferences || '[]').map((subject: string, index: number) => (
-                      <Chip key={index} label={subject} size="small" />
-                    ))}
-                  </Box>
-                </Box>
+      <Table
+        rowKey="id"
+        loading={isLoading}
+        columns={columns}
+        dataSource={alerts}
+        pagination={{ pageSize: 20 }}
+      />
 
-                <Typography variant="body2" gutterBottom>
-                  Distancia máxima: {alert.max_distance_km} km
-                </Typography>
-
-                <Chip
-                  label={alert.is_active ? 'Activa' : 'Inactiva'}
-                  color={alert.is_active ? 'success' : 'default'}
-                  size="small"
-                />
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
-
-      {/* Create/Edit Dialog */}
-      <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          {editingAlert ? 'Editar Alerta' : 'Nueva Alerta'}
-        </DialogTitle>
-        <DialogContent>
-          <Box display="flex" flexDirection="column" gap={2} mt={1}>
-            <TextField
-              label="Nombre del usuario"
-              value={formData.user_name}
-              onChange={(e) => setFormData({ ...formData, user_name: e.target.value })}
-              fullWidth
+      <Modal
+        title={editingId != null ? 'Editar alerta' : 'Nueva alerta'}
+        open={modalOpen}
+        onOk={handleSubmit}
+        onCancel={() => { setModalOpen(false); form.resetFields(); }}
+        confirmLoading={createMutation.isPending || updateMutation.isPending}
+      >
+        <Form form={form} layout="vertical">
+          <Form.Item name="user_id" label="Usuario">
+            <Select
+              placeholder="Seleccionar usuario (opcional)"
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              onChange={handleUserSelect}
+              options={(users as any[])?.map((u: any) => ({
+                label: `${u.username || u.name || 'Usuario'} (${u.email || 'sin email'})`,
+                value: u.id,
+              })) ?? []}
             />
-
-            <TextField
-              label="Número de WhatsApp"
-              value={formData.whatsapp_number}
-              onChange={(e) => setFormData({ ...formData, whatsapp_number: e.target.value })}
-              placeholder="+5491112345678"
-              fullWidth
+          </Form.Item>
+          <Form.Item name="user_name" label="Nombre" rules={[{ required: true }]}>
+            <Input placeholder="Nombre del usuario (se rellena al elegir usuario)" />
+          </Form.Item>
+          <Form.Item name="email_address" label="Email">
+            <Input type="email" placeholder="email@ejemplo.com (se rellena al elegir usuario)" />
+          </Form.Item>
+          <Form.Item name="subject_preferences" label="Materias de interés">
+            <Select
+              mode="multiple"
+              placeholder="Seleccionar materias"
+              options={subjects?.map((s: any) => ({ label: s.name, value: s.name })) ?? []}
             />
+          </Form.Item>
+          <Form.Item name="max_distance_km" label="Radio máximo (km)" initialValue={50}>
+            <InputNumber min={1} max={500} style={{ width: '100%' }} />
+          </Form.Item>
+        </Form>
+      </Modal>
 
-            <FormControl fullWidth>
-              <InputLabel>Materías preferidas</InputLabel>
-              <Select
-                multiple
-                value={formData.subject_preferences}
-                label="Materías preferidas"
-                onChange={(e) => setFormData({ ...formData, subject_preferences: e.target.value as string[] })}
-                renderValue={(selected) => (
-                  <Box display="flex" flexWrap="wrap" gap={1}>
-                    {(selected as string[]).map((value) => (
-                      <Chip key={value} label={value} size="small" />
-                    ))}
-                  </Box>
-                )}
-              >
-                {subjects?.map((subject: any) => (
-                  <MenuItem key={subject.id} value={subject.name}>
-                    {subject.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <TextField
-              label="Distancia máxima (km)"
-              type="number"
-              value={formData.max_distance_km}
-              onChange={(e) => setFormData({ ...formData, max_distance_km: parseInt(e.target.value) })}
-              fullWidth
+      <Modal
+        title="Probar notificaciones de concursos"
+        open={testModalOpen}
+        onOk={handleSendTestNotifications}
+        onCancel={() => { setTestModalOpen(false); testForm.resetFields(); }}
+        okText="Enviar email de prueba"
+        width={520}
+      >
+        <Paragraph type="secondary" style={{ marginBottom: 16 }}>
+          Se enviará un email al correo de la alerta con los concursos que coincidan con los filtros (fecha, departamento, materia). Opcional: dejá filtros vacíos para enviar hasta 50 concursos recientes.
+        </Paragraph>
+        <Form form={testForm} layout="vertical">
+          <Form.Item name="date_from" label="Fecha concurso desde">
+            <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
+          </Form.Item>
+          <Form.Item name="date_to" label="Fecha concurso hasta">
+            <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
+          </Form.Item>
+          <Form.Item name="departments" label="Departamentos">
+            <Select
+              mode="multiple"
+              placeholder="Todos si no elegís ninguno"
+              allowClear
+              options={(Array.isArray(departments) ? departments : []).map((d: string) => ({ label: d, value: d }))}
             />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpenDialog(false)}>Cancelar</Button>
-          <Button
-            onClick={handleSubmit}
-            variant="contained"
-            disabled={createMutation.isPending || updateMutation.isPending}
-          >
-            {createMutation.isPending || updateMutation.isPending ? (
-              <CircularProgress size={20} />
-            ) : (
-              'Guardar'
-            )}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Test Notification Dialog */}
-      <Dialog open={testNotificationOpen} onClose={() => setTestNotificationOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Enviar Notificación de Prueba</DialogTitle>
-        <DialogContent>
-          <TextField
-            label="Número de WhatsApp"
-            value={testPhoneNumber}
-            onChange={(e) => setTestPhoneNumber(e.target.value)}
-            placeholder="+5491112345678"
-            fullWidth
-            margin="normal"
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setTestNotificationOpen(false)}>Cancelar</Button>
-          <Button
-            onClick={handleSendTestNotification}
-            variant="contained"
-            startIcon={<SendIcon />}
-            disabled={testNotificationMutation.isPending}
-          >
-            {testNotificationMutation.isPending ? (
-              <CircularProgress size={20} />
-            ) : (
-              'Enviar Prueba'
-            )}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Test Notification Button */}
-      <Box position="fixed" bottom={20} right={20}>
-        <Button
-          variant="contained"
-          color="secondary"
-          startIcon={<NotificationIcon />}
-          onClick={() => setTestNotificationOpen(true)}
-        >
-          Probar Notificaciones
-        </Button>
-      </Box>
-    </Box>
+          </Form.Item>
+          <Form.Item name="subject_ids" label="Materias (por ID)">
+            <Select
+              mode="multiple"
+              placeholder="Todas si no elegís ninguna"
+              allowClear
+              optionFilterProp="label"
+              options={subjects?.map((s: any) => ({ label: s.name, value: s.id })) ?? []}
+            />
+          </Form.Item>
+          <Form.Item name="limit" label="Máximo de concursos en el email" initialValue={50}>
+            <InputNumber min={1} max={100} style={{ width: '100%' }} />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </div>
   );
 };
 

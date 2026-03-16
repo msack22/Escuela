@@ -1,184 +1,132 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
+import { Card, Col, Row, Typography, Alert, Spin } from 'antd';
 import {
-  Grid,
-  Card,
-  CardContent,
-  Typography,
-  Box,
-  Paper,
-  CircularProgress,
-  Alert,
-} from '@mui/material';
-import {
-  School as SchoolIcon,
-  Event as EventIcon,
-  NotificationsActive as NotificationIcon,
-  TrendingUp as TrendingIcon,
-} from '@mui/icons-material';
+  BarChartOutlined,
+  NotificationOutlined,
+  BankOutlined,
+  BookOutlined,
+} from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-
 import {
   fetchContestStatistics,
   fetchSystemStatus,
 } from '../../services/api';
 
-interface StatCardProps {
-  title: string;
-  value: number | string;
-  icon: React.ReactNode;
-  color: string;
-}
-
-const StatCard: React.FC<StatCardProps> = ({ title, value, icon, color }) => (
-  <Card>
-    <CardContent>
-      <Box display="flex" alignItems="center" justifyContent="space-between">
-        <Box>
-          <Typography color="textSecondary" gutterBottom variant="h6">
-            {title}
-          </Typography>
-          <Typography variant="h4" component="h2" style={{ color }}>
-            {value}
-          </Typography>
-        </Box>
-        <Box style={{ color, fontSize: 40 }}>
-          {icon}
-        </Box>
-      </Box>
-    </CardContent>
-  </Card>
-);
+const { Title, Text } = Typography;
 
 const Dashboard: React.FC = () => {
-  const [error, setError] = useState<string | null>(null);
-
-  const {
-    data: statistics,
-    isLoading: statsLoading,
-    error: statsError,
-  } = useQuery({
+  const { data: statistics, isLoading: statsLoading } = useQuery({
     queryKey: ['contestStatistics'],
     queryFn: fetchContestStatistics,
-    refetchInterval: 60000, // Refetch every minute
+    refetchInterval: 60000,
+    retry: 1,
   });
 
-  const {
-    data: systemStatus,
-    isLoading: statusLoading,
-    error: statusError,
-  } = useQuery({
+  const { data: systemStatus, isLoading: statusLoading } = useQuery({
     queryKey: ['systemStatus'],
     queryFn: fetchSystemStatus,
-    refetchInterval: 30000, // Refetch every 30 seconds
+    refetchInterval: 30000,
+    retry: 1,
   });
 
-  useEffect(() => {
-    if (statsError || statusError) {
-      setError('Error loading dashboard data');
-    }
-  }, [statsError, statusError]);
-
-  if (statsLoading || statusLoading) {
+  if (statusLoading && !systemStatus) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" height="400px">
-        <CircularProgress />
-      </Box>
+      <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}>
+        <Spin size="large" />
+      </div>
     );
   }
 
-  if (error) {
-    return (
-      <Alert severity="error" sx={{ mb: 2 }}>
-        {error}
-      </Alert>
-    );
-  }
-
+  const stats = statistics ?? null;
+  const apiUnreachable = systemStatus?.api_status === 'unreachable';
   return (
-    <Box>
-      <Typography variant="h4" gutterBottom>
+    <div>
+      <Title level={3} style={{ marginBottom: 24 }}>
         Dashboard
-      </Typography>
-      
-      <Grid container spacing={3}>
-        {/* Statistics Cards */}
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Total Concursos"
-            value={statistics?.total_contests || 0}
-            icon={<EventIcon />}
-            color="#1976d2"
-          />
-        </Grid>
-        
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Concursos Activos"
-            value={statistics?.active_contests || 0}
-            icon={<TrendingIcon />}
-            color="#4caf50"
-          />
-        </Grid>
-        
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Escuelas"
-            value={statistics?.total_schools || 0}
-            icon={<SchoolIcon />}
-            color="#ff9800"
-          />
-        </Grid>
-        
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Materias"
-            value={statistics?.total_subjects || 0}
-            icon={<NotificationIcon />}
-            color="#9c27b0"
-          />
-        </Grid>
+      </Title>
+      {apiUnreachable && (
+        <Alert
+          type="warning"
+          title="Backend no disponible"
+          description="No se pudo conectar al servidor. Compruebe que la API esté en ejecución en el puerto configurado."
+          style={{ marginBottom: 16 }}
+        />
+      )}
+      <Row gutter={[16, 16]}>
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <BarChartOutlined style={{ fontSize: 32, color: '#1677ff' }} />
+            <Title level={4} style={{ marginTop: 12 }}>
+              {stats?.total_contests ?? 0}
+            </Title>
+            <Text type="secondary">Total de concursos</Text>
+          </Card>
+        </Col>
 
-        {/* System Status */}
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>
-              Estado del Sistema
-            </Typography>
-            <Box>
-              <Typography variant="body1">
-                <strong>API Status:</strong> {systemStatus?.api_status || 'Unknown'}
-              </Typography>
-              <Typography variant="body1">
-                <strong>Scheduler:</strong> {systemStatus?.scheduler?.is_running ? 'Running' : 'Stopped'}
-              </Typography>
-              <Typography variant="body1">
-                <strong>Database:</strong> {systemStatus?.database || 'Unknown'}
-              </Typography>
-              <Typography variant="body1">
-                <strong>Scraping Interval:</strong> {systemStatus?.scheduler?.interval_hours || 2} hours
-              </Typography>
-            </Box>
-          </Paper>
-        </Grid>
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <NotificationOutlined style={{ fontSize: 32, color: '#52c41a' }} />
+            <Title level={4} style={{ marginTop: 12 }}>
+              {stats?.active_contests ?? 0}
+            </Title>
+            <Text type="secondary">Concursos activos</Text>
+          </Card>
+        </Col>
 
-        {/* Recent Activity */}
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>
-              Fuentes Disponibles
-            </Typography>
-            <Box>
-              {systemStatus?.scheduler?.available_sources?.map((source: string, index: number) => (
-                <Typography key={index} variant="body2" sx={{ mb: 1 }}>
-                  • {source}
-                </Typography>
-              )) || <Typography variant="body2">No sources available</Typography>}
-            </Box>
-          </Paper>
-        </Grid>
-      </Grid>
-    </Box>
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <BankOutlined style={{ fontSize: 32, color: '#faad14' }} />
+            <Title level={4} style={{ marginTop: 12 }}>
+              {stats?.total_schools ?? 0}
+            </Title>
+            <Text type="secondary">Escuelas</Text>
+          </Card>
+        </Col>
+
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <BookOutlined style={{ fontSize: 32, color: '#722ed1' }} />
+            <Title level={4} style={{ marginTop: 12 }}>
+              {stats?.total_subjects ?? 0}
+            </Title>
+            <Text type="secondary">Materias</Text>
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]} style={{ marginTop: 24 }}>
+        <Col xs={24} md={12}>
+          <Card title="Estado del sistema">
+            <p>
+              <Text strong>API:</Text>{' '}
+              {systemStatus?.api_status ?? 'desconocido'}
+            </p>
+            <p>
+              <Text strong>Base de datos:</Text>{' '}
+              {systemStatus?.database ?? 'desconocido'}
+            </p>
+            <p>
+              <Text strong>Scheduler:</Text>{' '}
+              {systemStatus?.scheduler?.is_running ? 'En ejecución' : 'Detenido'}
+            </p>
+          </Card>
+        </Col>
+
+        <Col xs={24} md={12}>
+          <Card title="Fuentes disponibles">
+            {systemStatus?.scheduler?.available_sources?.length ? (
+              systemStatus.scheduler.available_sources.map((s: string) => (
+                <p key={s}>• {s}</p>
+              ))
+            ) : (
+              <Text type="secondary">Sin fuentes configuradas</Text>
+            )}
+          </Card>
+        </Col>
+      </Row>
+    </div>
   );
 };
 
 export default Dashboard;
+

@@ -1,0 +1,40 @@
+{
+  "name": "escuela-backend",
+  "version": "1.0.0",
+  "description": "Backend Node.js para gestión de concursos educativos (migrado desde Python)",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "fastify": "^5.1.0",
+    "@fastify/cors": "^10.0.1",
+    "dotenv": "^16.4.5",
+    "zod": "^3.23.8",
+    "axios": "^1.7.7",
+    "cheerio": "^1.0.0",
+    "playwright": "^1.49.0",
+    "puppeteer": "^23.6.0",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.16"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/node-cron": "^3.0.11",
+    "@types/nodemailer": "^6.4.14",
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

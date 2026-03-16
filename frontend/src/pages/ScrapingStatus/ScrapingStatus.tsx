@@ -1,339 +1,271 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
-  Box,
   Card,
-  CardContent,
   Typography,
   Button,
   Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  Chip,
+  Space,
   Alert,
-  CircularProgress,
-  Grid,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-} from '@mui/material';
+  Spin,
+  Tag,
+  Progress,
+  Empty,
+} from 'antd';
 import {
-  PlayArrow as PlayIcon,
-  Stop as StopIcon,
-  Refresh as RefreshIcon,
-  Settings as SettingsIcon,
-} from '@mui/icons-material';
+  PlayCircleOutlined,
+  StopOutlined,
+  ReloadOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  ClockCircleOutlined,
+} from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
-
 import {
   fetchScrapingStatus,
-  fetchSystemStatus,
-  triggerManualScraping,
+  fetchScrapingLogs,
   runManualScraping,
   startScheduler,
   stopScheduler,
-  fetchScrapingLogs,
+  fetchScrapingProgress,
 } from '../../services/api';
 
-const ScrapingStatus: React.FC = () => {
-  const [selectedSource, setSelectedSource] = useState('');
-  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<'start' | 'stop' | null>(null);
+const { Title, Text } = Typography;
 
+const ScrapingStatus: React.FC = () => {
   const queryClient = useQueryClient();
 
-  const { data: status, isPending: statusLoading } = useQuery({
+  const { data: status, isLoading: statusLoading, error: statusError } = useQuery({
     queryKey: ['scrapingStatus'],
     queryFn: fetchScrapingStatus,
-    refetchInterval: 30000 // Refetch every 30 seconds
+    refetchInterval: 10000,
+  });
+
+  const { data: progress } = useQuery({
+    queryKey: ['scrapingProgress'],
+    queryFn: fetchScrapingProgress,
+    refetchInterval: (status as any)?.is_running ? 2000 : false,
   });
 
   const { data: logsData, isLoading: logsLoading } = useQuery({
     queryKey: ['scrapingLogs'],
     queryFn: () => fetchScrapingLogs(50),
-    refetchInterval: 60000 // Refetch every minute
   });
 
-  const manualScrapingMutation = useMutation({
-    mutationFn: runManualScraping,
-    onSuccess: (data) => {
+  const runMutation = useMutation({
+    mutationFn: () => runManualScraping(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['scrapingStatus'] });
       queryClient.invalidateQueries({ queryKey: ['scrapingLogs'] });
-      alert(`Scraping completado: ${data.total_contests_found} concursos encontrados`);
+      queryClient.invalidateQueries({ queryKey: ['scrapingProgress'] });
     },
-    onError: (error) => {
-      alert(`Error en scraping: ${error}`);
-    }
   });
 
-  const startSchedulerMutation = useMutation({
+  const startMutation = useMutation({
     mutationFn: startScheduler,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['scrapingStatus'] });
-      alert('Scheduler iniciado correctamente');
-    },
-    onError: (error: any) => {
-      alert(error.response?.data?.detail || 'Error al iniciar scheduler');
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['scrapingStatus'] }),
   });
 
-  const stopSchedulerMutation = useMutation({
+  const stopMutation = useMutation({
     mutationFn: stopScheduler,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['scrapingStatus'] });
-      alert('Scheduler detenido correctamente');
-    },
-    onError: (error: any) => {
-      alert(error.response?.data?.detail || 'Error al detener scheduler');
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['scrapingStatus'] }),
   });
 
-  const handleManualScraping = () => {
-    manualScrapingMutation.mutate(selectedSource || undefined);
-  };
+  const logs = (logsData as any)?.logs ?? [];
+  const st = (status as any) || {};
+  const apiUnreachable = st.api_status === 'unreachable';
+  const isRunning = runMutation.isPending || st.is_running || (progress as any)?.running;
+  const progressData = progress as any;
 
-  const handleStartScheduler = () => {
-    setConfirmAction('start');
-    setConfirmDialogOpen(true);
-  };
-
-  const handleStopScheduler = () => {
-    setConfirmAction('stop');
-    setConfirmDialogOpen(true);
-  };
-
-  const executeConfirmAction = () => {
-    if (confirmAction === 'start') {
-      startSchedulerMutation.mutate();
-    } else if (confirmAction === 'stop') {
-      stopSchedulerMutation.mutate();
-    }
-    setConfirmDialogOpen(false);
-    setConfirmAction(null);
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'success':
-        return 'success';
-      case 'error':
-        return 'error';
-      case 'running':
-        return 'warning';
-      default:
-        return 'default';
-    }
-  };
+  const logColumns = [
+    {
+      title: 'Fecha',
+      dataIndex: 'started_at',
+      key: 'started_at',
+      width: 180,
+      render: (v: string) => (v ? new Date(v).toLocaleString('es-AR') : '—'),
+    },
+    {
+      title: 'Fuente',
+      dataIndex: 'source_name',
+      key: 'source_name',
+      width: 140,
+      render: (v: string) => (v ? <Tag color="blue">{v}</Tag> : '—'),
+    },
+    {
+      title: 'Estado',
+      dataIndex: 'status',
+      key: 'status',
+      width: 100,
+      render: (v: string) => {
+        if (v === 'success')
+          return <Tag icon={<CheckCircleOutlined />} color="success">Éxito</Tag>;
+        if (v === 'error')
+          return <Tag icon={<CloseCircleOutlined />} color="error">Error</Tag>;
+        return <Tag icon={<ClockCircleOutlined />}>{v || '—'}</Tag>;
+      },
+    },
+    {
+      title: 'Encontrados',
+      dataIndex: 'contests_found',
+      key: 'contests_found',
+      width: 100,
+      align: 'center' as const,
+      render: (n: number) => (n != null ? n : '—'),
+    },
+    {
+      title: 'Detalle',
+      key: 'message',
+      render: (_: any, r: any) => {
+        const msg = r.error_message
+          ? `Error: ${r.error_message}`
+          : r.execution_time_seconds != null
+            ? `Tiempo: ${r.execution_time_seconds.toFixed(1)}s`
+            : '';
+        return <Text type="secondary" style={{ fontSize: 12 }}>{msg || '—'}</Text>;
+      },
+    },
+  ];
 
   return (
-    <Box>
-      <Typography variant="h4" gutterBottom>
-        Estado del Sistema de Scraping
-      </Typography>
+    <div style={{ maxWidth: 960, margin: '0 auto', padding: '0 24px 24px' }}>
+      <Title level={3} style={{ marginBottom: 24 }}>
+        Estado de scraping
+      </Title>
 
-      {/* Status Cards */}
-      <Grid container spacing={3} mb={3}>
-        <Grid item xs={12} md={6}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Estado del Scheduler
-              </Typography>
-              <Box display="flex" alignItems="center" gap={2} mb={2}>
-                <Chip
-                  label={status?.is_running ? 'En ejecución' : 'Detenido'}
-                  color={status?.is_running ? 'success' : 'default'}
-                />
-                <Typography variant="body2">
-                  Intervalo: {status?.interval_hours || 2} horas
-                </Typography>
-              </Box>
-              <Box display="flex" gap={1}>
-                <Button
-                  variant="contained"
-                  color="success"
-                  startIcon={<PlayIcon />}
-                  onClick={handleStartScheduler}
-                  disabled={status?.is_running || startSchedulerMutation.isPending}
-                  size="small"
-                >
-                  Iniciar
-                </Button>
-                <Button
-                  variant="contained"
-                  color="error"
-                  startIcon={<StopIcon />}
-                  onClick={handleStopScheduler}
-                  disabled={!status?.is_running || stopSchedulerMutation.isPending}
-                  size="small"
-                >
-                  Detener
-                </Button>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
+      {apiUnreachable && (
+        <Alert
+          type="warning"
+          showIcon
+          message="Backend no disponible"
+          description="No se pudo conectar al servidor. Compruebe que la API esté en ejecución."
+          style={{ marginBottom: 24 }}
+        />
+      )}
 
-        <Grid item xs={12} md={6}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Scraping Manual
-              </Typography>
-              <Box display="flex" alignItems="center" gap={2} mb={2}>
-                <FormControl size="small" sx={{ minWidth: 200 }}>
-                  <InputLabel>Fuente</InputLabel>
-                  <Select
-                    value={selectedSource}
-                    label="Fuente"
-                    onChange={(e) => setSelectedSource(e.target.value)}
-                  >
-                    <MenuItem value="">Todas las fuentes</MenuItem>
-                    {status?.all_sources?.map((source: string) => (
-                      <MenuItem key={source} value={source}>
-                        {source}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Box>
-              <Button
-                variant="contained"
-                startIcon={<RefreshIcon />}
-                onClick={handleManualScraping}
-                disabled={manualScrapingMutation.isPending}
-                fullWidth
-              >
-                {manualScrapingMutation.isPending ? (
-                  <CircularProgress size={20} />
-                ) : (
-                  'Ejecutar Scraping'
-                )}
-              </Button>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      {/* Banner cuando está ejecutando */}
+      {isRunning && (
+        <Card
+          size="small"
+          style={{
+            marginBottom: 24,
+            background: 'linear-gradient(135deg, #e6f4ff 0%, #f0f7ff 100%)',
+            border: '1px solid #91caff',
+          }}
+        >
+          <Space align="center" size="middle" wrap>
+            <Spin size="small" />
+            <div>
+              <Text strong style={{ display: 'block' }}>
+                {progressData?.step || 'Ejecutando scraping...'}
+              </Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Puede tardar 2–3 minutos según la cantidad de fuentes. No cierres esta página.
+              </Text>
+            </div>
+            {typeof progressData?.percentage === 'number' && (
+              <Progress
+                percent={progressData.percentage}
+                size="small"
+                style={{ width: 120, marginBottom: 0 }}
+              />
+            )}
+            {progressData?.items_found != null && (
+              <Text type="secondary">{progressData.items_found} concursos encontrados</Text>
+            )}
+          </Space>
+        </Card>
+      )}
 
-      {/* Sources Status */}
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Estado de Fuentes
-          </Typography>
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={6}>
-              <Typography variant="subtitle2" gutterBottom>
-                Fuentes Disponibles:
-              </Typography>
-              {status?.available_sources?.map((source: string, index: number) => (
-                <Chip
-                  key={index}
-                  label={source}
-                  color="success"
-                  size="small"
-                  sx={{ m: 0.5 }}
-                />
-              ))}
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Typography variant="subtitle2" gutterBottom>
-                Todas las Fuentes:
-              </Typography>
-              {status?.all_sources?.map((source: string, index: number) => (
-                <Chip
-                  key={index}
-                  label={source}
-                  color={status?.available_sources?.includes(source) ? 'success' : 'default'}
-                  size="small"
-                  sx={{ m: 0.5 }}
-                />
-              ))}
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
+      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Card title="Acciones" loading={statusLoading}>
+          <Space wrap size="middle">
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              loading={runMutation.isPending}
+              onClick={() => runMutation.mutate()}
+            >
+              Ejecutar scraping ahora
+            </Button>
+            <Button
+              icon={<PlayCircleOutlined />}
+              loading={startMutation.isPending}
+              onClick={() => startMutation.mutate()}
+            >
+              Iniciar scheduler
+            </Button>
+            <Button
+              danger
+              icon={<StopOutlined />}
+              loading={stopMutation.isPending}
+              onClick={() => stopMutation.mutate()}
+            >
+              Detener scheduler
+            </Button>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                queryClient.invalidateQueries({ queryKey: ['scrapingStatus'] });
+                queryClient.invalidateQueries({ queryKey: ['scrapingLogs'] });
+                queryClient.invalidateQueries({ queryKey: ['scrapingProgress'] });
+              }}
+            >
+              Actualizar
+            </Button>
+          </Space>
+        </Card>
 
-      {/* Logs Table */}
-      <Card>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Logs de Ejecución
-          </Typography>
-          
-          {logsLoading ? (
-            <Box display="flex" justifyContent="center" p={4}>
-              <CircularProgress />
-            </Box>
+        <Card title="Estado actual">
+          {statusLoading ? (
+            <Spin size="small" />
+          ) : status ? (
+            <Space size="middle" wrap>
+              <Space>
+                <Text type="secondary">Scheduler:</Text>
+                <Tag color={st.is_running ? 'green' : 'default'}>
+                  {st.is_running ? 'Activo' : 'Inactivo'}
+                </Tag>
+              </Space>
+              {st.interval_hours != null && (
+                <Space>
+                  <Text type="secondary">Intervalo:</Text>
+                  <Text>{st.interval_hours} h</Text>
+                </Space>
+              )}
+              {Array.isArray(st.available_sources) && st.available_sources.length > 0 && (
+                <Space>
+                  <Text type="secondary">Fuentes:</Text>
+                  <Text>{st.available_sources.length} disponibles</Text>
+                </Space>
+              )}
+            </Space>
           ) : (
-            <TableContainer component={Paper}>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Fuente</TableCell>
-                    <TableCell>Estado</TableCell>
-                    <TableCell>Concursos Encontrados</TableCell>
-                    <TableCell>Concursos Procesados</TableCell>
-                    <TableCell>Tiempo de Ejecución</TableCell>
-                    <TableCell>Fecha</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {logsData?.logs?.map((log: any) => (
-                    <TableRow key={log.id}>
-                      <TableCell>{log.source_name}</TableCell>
-                      <TableCell>
-                        <Chip
-                          label={log.status}
-                          color={getStatusColor(log.status)}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell>{log.contests_found}</TableCell>
-                      <TableCell>{log.contests_processed}</TableCell>
-                      <TableCell>
-                        {log.execution_time_seconds
-                          ? `${log.execution_time_seconds.toFixed(2)}s`
-                          : 'N/A'}
-                      </TableCell>
-                      <TableCell>
-                        {log.started_at
-                          ? format(new Date(log.started_at), 'dd/MM/yyyy HH:mm:ss')
-                          : 'N/A'}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+            <Text type="secondary">Sin datos</Text>
           )}
-        </CardContent>
-      </Card>
+        </Card>
 
-      {/* Confirmation Dialog */}
-      <Dialog open={confirmDialogOpen} onClose={() => setConfirmDialogOpen(false)}>
-        <DialogTitle>Confirmar Acción</DialogTitle>
-        <DialogContent>
-          <Typography>
-            ¿Estás seguro de que quieres {confirmAction === 'start' ? 'iniciar' : 'detener'} el scheduler?
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setConfirmDialogOpen(false)}>Cancelar</Button>
-          <Button onClick={executeConfirmAction} variant="contained">
-            Confirmar
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </Box>
+        <Card title="Últimos logs">
+          <Table
+            rowKey={(r: any, index: number) =>
+              r.id ?? `${r.started_at ?? ''}-${r.source_name ?? ''}-${index}`
+            }
+            loading={logsLoading}
+            columns={logColumns}
+            dataSource={logs}
+            pagination={{ pageSize: 10, showSizeChanger: false }}
+            size="small"
+            locale={{
+              emptyText: (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="Aún no hay registros de scraping. Ejecute el scraping para ver logs."
+                />
+              ),
+            }}
+          />
+        </Card>
+      </Space>
+    </div>
   );
 };
 

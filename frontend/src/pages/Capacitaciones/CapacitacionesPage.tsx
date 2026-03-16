@@ -1,94 +1,92 @@
-import React, { useState, useEffect } from 'react';
-import { Box, CircularProgress, Alert } from '@mui/material';
-import CapacitacionesList from './CapacitacionesList';
-import { fetchCapacitaciones, scrapeCapacitaciones } from '../../services/api';
+import React, { useState } from 'react';
+import { Table, Typography, Button, Input, Row, Col, Card, Spin, Alert, Space } from 'antd';
+import { ReloadOutlined } from '@ant-design/icons';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { fetchCapacitaciones, scrapeCapacitaciones, fetchCapacitacionesStatistics } from '../../services/api';
 
-interface Capacitacion {
-  id: number;
-  titulo: string;
-  descripcion?: string;
-  institucion?: string;
-  modalidad?: string;
-  duracion?: string;
-  fecha_inicio?: string;
-  fecha_fin?: string;
-  fecha_limite_inscripcion?: string;
-  precio?: number;
-  moneda?: string;
-  beca_disponible?: boolean;
-  puntaje_asignado?: number;
-  tipo_certificado?: string;
-  horas_catedra?: number;
-  url_inscripcion?: string;
-  email_contacto?: string;
-  telefono_contacto?: string;
-  provincia?: string;
-  ciudad?: string;
-  direccion?: string;
-  nivel_educativo?: string;
-  destinatarios?: string;
-  fuente: string;
-  url_fuente?: string;
-  fecha_scraping: string;
-  activa: boolean;
-}
+const { Title, Text } = Typography;
 
 const CapacitacionesPage: React.FC = () => {
-  const [capacitaciones, setCapacitaciones] = useState<Capacitacion[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [filters, setFilters] = useState<Record<string, any>>({});
+  const queryClient = useQueryClient();
 
-  const loadCapacitaciones = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await fetchCapacitaciones();
-      setCapacitaciones(data);
-    } catch (err) {
-      setError('Error al cargar las capacitaciones');
-      console.error('Error loading capacitaciones:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { data: list, isLoading, error } = useQuery({
+    queryKey: ['capacitaciones', filters],
+    queryFn: () => fetchCapacitaciones({ limit: 100, ...filters }),
+  });
 
-  const handleScrape = async () => {
-    try {
-      await scrapeCapacitaciones();
-      await loadCapacitaciones(); // Reload data after scraping
-    } catch (err) {
-      setError('Error al actualizar los datos');
-      console.error('Error scraping capacitaciones:', err);
-    }
-  };
+  const { data: stats } = useQuery({
+    queryKey: ['capacitacionesStats'],
+    queryFn: fetchCapacitacionesStatistics,
+  });
 
-  useEffect(() => {
-    loadCapacitaciones();
-  }, []);
+  const scrapeMutation = useMutation({
+    mutationFn: scrapeCapacitaciones,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['capacitaciones'] });
+      queryClient.invalidateQueries({ queryKey: ['capacitacionesStats'] });
+    },
+  });
 
-  if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-        <CircularProgress />
-      </Box>
-    );
-  }
+  const dataSource = Array.isArray(list) ? list : (list as any)?.items ?? [];
+  const columns = [
+    { title: 'Título', dataIndex: 'titulo', key: 'titulo' },
+    { title: 'Institución', dataIndex: 'institucion', key: 'institucion' },
+    { title: 'Modalidad', dataIndex: 'modalidad', key: 'modalidad' },
+    { title: 'Ciudad', dataIndex: 'ciudad', key: 'ciudad' },
+    { title: 'Fuente', dataIndex: 'fuente', key: 'fuente' },
+  ];
 
   if (error) {
     return (
-      <Box mb={3}>
-        <Alert severity="error">{error}</Alert>
-      </Box>
+      <Alert
+        type="error"
+        title="Error al cargar capacitaciones"
+        description={(error as Error)?.message}
+      />
     );
   }
 
   return (
-    <CapacitacionesList
-      capacitaciones={capacitaciones}
-      loading={loading}
-      onRefresh={loadCapacitaciones}
-      onScrape={handleScrape}
-    />
+    <div>
+      <Title level={3} style={{ marginBottom: 24 }}>
+        Capacitaciones
+      </Title>
+
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+        <Col xs={24} md={8}>
+          <Card size="small">
+            <Text type="secondary">Total</Text>
+            <div style={{ fontSize: 24, fontWeight: 600 }}>{stats?.total ?? dataSource.length}</div>
+          </Card>
+        </Col>
+        <Col xs={24} md={16} style={{ display: 'flex', alignItems: 'center' }}>
+          <Space>
+            <Input
+              placeholder="Buscar por título"
+              style={{ width: 200 }}
+              onChange={(e) => setFilters((f) => ({ ...f, titulo: e.target.value || undefined }))}
+            />
+            <Button
+              type="primary"
+              icon={<ReloadOutlined />}
+              loading={scrapeMutation.isPending}
+              onClick={() => scrapeMutation.mutate()}
+            >
+              Actualizar desde fuente
+            </Button>
+          </Space>
+        </Col>
+      </Row>
+
+      <Table
+        rowKey="id"
+        loading={isLoading}
+        columns={columns}
+        dataSource={dataSource}
+        pagination={{ pageSize: 20 }}
+      />
+    </div>
   );
 };
 

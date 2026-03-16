@@ -1,0 +1,136 @@
+// Schema compatible con el backend Python (mismas tablas para compartir DB)
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model School {
+  id             Int      @id @default(autoincrement())
+  name           String   @db.VarChar(255)
+  city           String   @db.VarChar(100)
+  department     String   @db.VarChar(100)
+  address        String?  @db.Text
+  latitude       Float?
+  longitude      Float?
+  phone          String?  @db.VarChar(50)
+  email          String?  @db.VarChar(255)
+  school_type    String?  @db.VarChar(100)
+  school_number  String?  @db.VarChar(50)
+  principal_name String?  @db.VarChar(255)
+  created_at     DateTime @default(now())
+  updated_at     DateTime? @updatedAt
+
+  contests Contest[]
+
+  @@map("schools")
+}
+
+model Subject {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique @db.VarChar(255)
+  description String?  @db.Text
+  created_at  DateTime @default(now())
+
+  contests Contest[]
+
+  @@map("subjects")
+}
+
+model Contest {
+  id                    Int       @id @default(autoincrement())
+  title                 String    @db.VarChar(500)
+  description           String?   @db.Text
+  date                  DateTime  @db.DateTime(0)
+  registration_deadline DateTime? @db.DateTime(0)
+  publication_date     DateTime? @db.DateTime(0)
+  level                 String?   @db.VarChar(50)
+  shift                 String?   @db.VarChar(50)
+  schedule              String?   @db.Text
+  hours_to_cover        Int?
+  contract_type         String?   @db.VarChar(100)
+  school_id             Int
+  subject_id            Int
+  source_url            String    @db.VarChar(1000)
+  source_name           String    @db.VarChar(255)
+  is_active             Boolean   @default(true)
+  is_processed          Boolean   @default(false)
+  created_at            DateTime  @default(now())
+  updated_at            DateTime? @updatedAt
+
+  school  School  @relation(fields: [school_id], references: [id])
+  subject Subject @relation(fields: [subject_id], references: [id])
+  alerts  Alert[]
+  notifications ContestNotificationSent[]
+
+  @@map("contests")
+}
+
+model User {
+  id                      Int      @id @default(autoincrement())
+  email                   String   @unique @db.VarChar(255)
+  name                    String   @db.VarChar(255)
+  phone_number            String?  @db.VarChar(50)
+  is_active               Boolean  @default(true)
+  is_admin                Boolean  @default(false)
+  notification_days_ahead Int      @default(3)
+  created_at              DateTime @default(now())
+  updated_at              DateTime? @updatedAt
+
+  alerts Alert[]
+
+  @@map("users")
+}
+
+model Alert {
+  id                    Int      @id @default(autoincrement())
+  user_id               Int?
+  user_name             String   @db.VarChar(255)
+  whatsapp_number       String   @default("") @db.VarChar(20)
+  email_address         String?  @db.VarChar(255)
+  subject_preferences   String?  @db.Text
+  max_distance_km       Int      @default(50)
+  notification_channels String   @default("both") @db.VarChar(50)
+  is_active              Boolean  @default(true)
+  contest_id             Int?
+  created_at             DateTime @default(now())
+  updated_at             DateTime? @updatedAt
+
+  user       User?    @relation(fields: [user_id], references: [id])
+  contest    Contest? @relation(fields: [contest_id], references: [id])
+  notifications ContestNotificationSent[]
+
+  @@map("alerts")
+}
+
+model ContestNotificationSent {
+  id          Int      @id @default(autoincrement())
+  alert_id    Int
+  contest_id  Int
+  sent_at     DateTime @default(now())
+  status      String   @default("sent") @db.VarChar(50)
+  error_message String? @db.Text
+
+  alert   Alert   @relation(fields: [alert_id], references: [id])
+  contest Contest @relation(fields: [contest_id], references: [id])
+
+  @@unique([alert_id, contest_id])
+  @@map("contest_notification_sent")
+}
+
+model ScrapingLog {
+  id                    Int      @id @default(autoincrement())
+  source_name           String   @db.VarChar(255)
+  status                String   @db.VarChar(50)
+  contests_found         Int      @default(0)
+  contests_processed    Int      @default(0)
+  error_message         String?  @db.Text
+  execution_time_seconds Float?
+  started_at            DateTime @default(now())
+  finished_at           DateTime?
+
+  @@map("scraping_logs")
+}

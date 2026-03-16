@@ -1,7 +1,9 @@
 import axios from 'axios';
 // import { simpleLogger } from '../utils/simpleLogger.js';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+// En Vite las variables de entorno se acceden con import.meta.env
+// Por defecto apuntamos al backend FastAPI en el puerto 8000
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -11,23 +13,41 @@ const api = axios.create({
   },
 });
 
-// Contest API calls
+// Contest API calls – default when backend unavailable
+const DEFAULT_CONTESTS_RESPONSE = { contests: [], total: 0, skip: 0, limit: 100 };
+
+/** Serializa params para FastAPI: listas como claves repetidas (subject_ids=1&subject_ids=2) */
+function serializeContestParams(cleanParams: Record<string, any>): string {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(cleanParams)) {
+    if (Array.isArray(v)) {
+      v.forEach((item: any) => parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(item))}`));
+    } else {
+      parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+    }
+  }
+  return parts.join('&');
+}
+
 export const fetchContests = async (params: any = {}) => {
-  // Clean empty parameters and format dates
-  const cleanParams = Object.keys(params).reduce((acc: any, key) => {
-    if (params[key] !== '' && params[key] !== null && params[key] !== undefined) {
-      // Convert date strings to datetime format for API
+  try {
+    const cleanParams: Record<string, any> = {};
+    for (const key of Object.keys(params)) {
+      const val = params[key];
+      if (val === '' || val === null || val === undefined) continue;
+      if (Array.isArray(val) && val.length === 0) continue;
       if (key === 'date_from' || key === 'date_to') {
-        acc[key] = new Date(params[key]).toISOString();
+        cleanParams[key] = new Date(val).toISOString();
       } else {
-        acc[key] = params[key];
+        cleanParams[key] = val;
       }
     }
-    return acc;
-  }, {});
-  
-  const response = await api.get('/api/contests/', { params: cleanParams });
-  return response.data;
+    const query = Object.keys(cleanParams).length ? `?${serializeContestParams(cleanParams)}` : '';
+    const response = await api.get(`/api/contests/${query}`);
+    return response.data;
+  } catch {
+    return DEFAULT_CONTESTS_RESPONSE;
+  }
 };
 
 export const fetchContestById = async (id: number) => {
@@ -35,80 +55,144 @@ export const fetchContestById = async (id: number) => {
   return response.data;
 };
 
+const DEFAULT_STATISTICS = {
+  total_contests: 0,
+  active_contests: 0,
+  total_schools: 0,
+  total_subjects: 0,
+  contests_by_month: [] as unknown[],
+};
+
 export const fetchContestStatistics = async () => {
-  const response = await api.get('/api/contests/statistics/summary');
-  return response.data;
+  try {
+    const response = await api.get('/api/contests/statistics/summary');
+    return { ...DEFAULT_STATISTICS, ...response.data };
+  } catch {
+    return DEFAULT_STATISTICS;
+  }
 };
 
 export const fetchSubjects = async () => {
-  const response = await api.get('/api/subjects/');
-  return response.data;
+  try {
+    const response = await api.get('/api/subjects/');
+    return response.data ?? [];
+  } catch {
+    return [];
+  }
 };
 
 export const fetchCities = async () => {
-  const response = await api.get('/api/contests/filters/cities');
-  return response.data;
+  try {
+    const response = await api.get('/api/contests/filters/cities');
+    const data = response.data;
+    return Array.isArray(data) ? data : (data?.cities ?? []);
+  } catch {
+    return [];
+  }
 };
 
 export const fetchDepartments = async () => {
-  const response = await api.get('/api/contests/filters/departments');
-  return response.data;
+  try {
+    const response = await api.get('/api/contests/filters/departments');
+    const data = response.data;
+    return Array.isArray(data) ? data : (data?.departments ?? []);
+  } catch {
+    return [];
+  }
 };
 
-// New filter functions
 export const fetchLevels = async () => {
-  const response = await api.get('/api/contests/filters/levels');
-  return response.data;
+  try {
+    const response = await api.get('/api/contests/filters/levels');
+    const data = response.data;
+    return Array.isArray(data) ? data : (data?.levels ?? []);
+  } catch {
+    return [];
+  }
 };
 
 export const fetchShifts = async () => {
-  const response = await api.get('/api/contests/filters/shifts');
-  return response.data;
+  try {
+    const response = await api.get('/api/contests/filters/shifts');
+    const data = response.data;
+    return Array.isArray(data) ? data : (data?.shifts ?? []);
+  } catch {
+    return [];
+  }
 };
 
 export const fetchContractTypes = async () => {
-  const response = await api.get('/api/contests/filters/contract-types');
-  return response.data;
+  try {
+    const response = await api.get('/api/contests/filters/contract-types');
+    const data = response.data;
+    return Array.isArray(data) ? data : (data?.contract_types ?? []);
+  } catch {
+    return [];
+  }
 };
 
-// Interceptor para manejar errores con logging básico
+export const fetchSources = async (): Promise<{ name: string }[]> => {
+  try {
+    const response = await api.get<{ sources?: { name: string }[] }>('/api/contests/filters/sources');
+    const data = response.data;
+    const list = Array.isArray(data?.sources) ? data.sources : [];
+    return list;
+  } catch (err) {
+    console.warn('[API] fetchSources failed:', err);
+    return [];
+  }
+};
+
+// Log de todas las peticiones salientes
+api.interceptors.request.use((config) => {
+  const method = (config.method ?? 'get').toUpperCase();
+  const url = config.baseURL && config.url ? `${config.baseURL}${config.url}` : config.url;
+  console.info(`[API] → ${method} ${url}`);
+  return config;
+});
+
+// Evitar spamear consola cuando el backend no está (solo avisar una vez cada 10 s)
+let lastNetworkErrorLog = 0;
+const NETWORK_ERROR_LOG_INTERVAL_MS = 10000;
+
+// Log de respuestas (éxito y error)
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const method = (response.config?.method ?? 'get').toUpperCase();
+    const url = response.config?.url ?? '';
+    const status = response.status;
+    console.info(`[API] ← ${method} ${url} → ${status}`);
+    return response;
+  },
   (error) => {
-    // Loggear error automáticamente en consola
+    const method = (error.config?.method ?? 'get').toUpperCase();
+    const url = error.config?.url ?? '';
     if (error.response) {
-      // Error de respuesta del servidor (4xx, 5xx)
-      console.error('API Response Error:', {
-        url: error.config?.url,
-        method: error.config?.method,
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data
-      });
+      console.error(`[API] ← ${method} ${url} → ${error.response?.status}`, error.response?.data);
     } else if (error.request) {
-      // Error de red
-      console.error('Network Error:', {
-        url: error.config?.url,
-        method: error.config?.method,
-        message: error.message
-      });
+      const now = Date.now();
+      if (now - lastNetworkErrorLog >= NETWORK_ERROR_LOG_INTERVAL_MS) {
+        lastNetworkErrorLog = now;
+        console.warn(
+          '[API] Backend no disponible (conexión rechazada). Ejecute en una terminal: cd backend && python run.py'
+        );
+      }
     } else {
-      // Error en la configuración
-      console.error('API Configuration Error:', {
-        message: error.message,
-        config: error.config
-      });
+      console.error('[API] Error:', error.message, error.config);
     }
-    
-    console.error('API Error:', error);
     return Promise.reject(error);
   }
 );
 
 // Alert API calls
 export const fetchAlerts = async () => {
-  const response = await api.get('/api/alerts/');
-  return response.data;
+  try {
+    const response = await api.get('/api/alerts/');
+    const data = response.data;
+    return Array.isArray(data) ? data : (data?.results ?? data ?? []);
+  } catch {
+    return [];
+  }
 };
 
 export const createAlert = async (alertData: any) => {
@@ -131,10 +215,33 @@ export const deleteAlert = async (id: number) => {
   return response.data;
 };
 
+/** Cuándo se envían las notificaciones (scheduler, etc.) */
+export const fetchAlertNotificationInfo = async () => {
+  const response = await api.get('/api/alert-meta/notification-info');
+  return response.data;
+};
+
+/** Prueba de notificaciones: envía email y WhatsApp (si tiene número) con asunto y filtros en el mensaje */
+export const sendTestContestNotifications = async (
+  alertId: number,
+  params: {
+    date_from?: string;
+    date_to?: string;
+    departments?: string[];
+    subject_ids?: number[];
+    limit?: number;
+  }
+) => {
+  const body = { ...params, alert_id: alertId };
+  const response = await api.post('/api/alert-meta/test-contest-notifications', body);
+  return response.data;
+};
+
 // User API calls
 export const fetchUsers = async () => {
   const response = await api.get('/api/users/');
-  return response.data;
+  const data = response.data;
+  return Array.isArray(data) ? data : (data?.results ?? data ?? []);
 };
 
 export const fetchUserAlerts = async (userId: number) => {
@@ -147,25 +254,56 @@ export const fetchUserContestNotifications = async (userId: number) => {
   return response.data;
 };
 
+/** Timeout para crear/actualizar usuario (backend puede tardar en cold start o DB). */
+const USER_MUTATE_TIMEOUT_MS = 60000;
+
 export const createUser = async (userData: any) => {
-  const response = await api.post('/api/users/', userData);
-  return response.data;
+  try {
+    const response = await api.post('/api/users/', userData, {
+      timeout: USER_MUTATE_TIMEOUT_MS,
+    });
+    return response.data;
+  } catch (err: any) {
+    if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+      throw new Error(
+        'El servidor no respondió a tiempo. Compruebe que el backend esté en ejecución (cd backend && python run.py).'
+      );
+    }
+    throw err;
+  }
 };
 
 export const updateUser = async (id: number, userData: any) => {
-  const response = await api.put(`/api/users/${id}`, userData);
+  const response = await api.put(`/api/users/${id}`, userData, {
+    timeout: USER_MUTATE_TIMEOUT_MS,
+  });
   return response.data;
 };
 
 export const deleteUser = async (id: number) => {
-  const response = await api.delete(`/api/users/${id}`);
+  const response = await api.delete(`/api/users/${id}`, {
+    timeout: 15000,
+  });
   return response.data;
 };
 
 // Scheduler Control API calls
+const DEFAULT_SCHEDULER_STATUS = {
+  is_running: false,
+  last_run: null as string | null,
+  next_run: null as string | null,
+  job_count: 0,
+  available_sources: [] as string[],
+  api_status: 'ok' as string,
+};
+
 export const getSchedulerStatus = async () => {
-  const response = await api.get('/api/scheduler/status');
-  return response.data;
+  try {
+    const response = await api.get('/api/scheduler/status');
+    return { ...DEFAULT_SCHEDULER_STATUS, ...response.data, api_status: 'ok' };
+  } catch {
+    return { ...DEFAULT_SCHEDULER_STATUS, api_status: 'unreachable' };
+  }
 };
 
 export const runScrapingOnce = async (data: { source?: string; force?: boolean }) => {
@@ -200,14 +338,43 @@ export const sendMultiNotification = async (notificationData: any) => {
 };
 
 // Statistics API calls
+const DEFAULT_SYSTEM_STATUS = {
+  api_status: 'unknown' as string,
+  database: 'unknown' as string,
+  scheduler: {
+    is_running: false,
+    last_run: null as string | null,
+    next_run: null as string | null,
+    available_sources: [] as string[],
+  },
+};
+
+/** Timeout corto para detectar rápido si el backend está caído y mostrar el aviso. */
+const STATUS_CHECK_TIMEOUT_MS = 5000;
+
 export const fetchSystemStatus = async () => {
-  const response = await api.get('/api/status');
-  return response.data;
+  try {
+    const response = await api.get('/api/status', { timeout: STATUS_CHECK_TIMEOUT_MS });
+    return { ...DEFAULT_SYSTEM_STATUS, ...response.data };
+  } catch {
+    return { ...DEFAULT_SYSTEM_STATUS, api_status: 'unreachable' };
+  }
+};
+
+const DEFAULT_SCRAPING_STATUS = {
+  is_running: false,
+  last_run: null as string | null,
+  sources: [] as any[],
+  api_status: 'ok' as string,
 };
 
 export const fetchScrapingStatus = async () => {
-  const response = await api.get('/api/scraping/status');
-  return response.data;
+  try {
+    const response = await api.get('/api/scraping/status');
+    return { ...DEFAULT_SCRAPING_STATUS, ...response.data, api_status: 'ok' };
+  } catch {
+    return { ...DEFAULT_SCRAPING_STATUS, api_status: 'unreachable' };
+  }
 };
 
 export const triggerManualScraping = async (source?: string) => {
@@ -235,8 +402,46 @@ export const stopScheduler = async () => {
 };
 
 export const fetchScrapingLogs = async (limit: number = 50) => {
-  const response = await api.get(`/api/scraping/logs?limit=${limit}`);
-  return response.data;
+  try {
+    const response = await api.get(`/api/scraping/logs?limit=${limit}`);
+    const data = response.data;
+    return Array.isArray(data?.logs) ? data : { logs: data?.logs ?? [] };
+  } catch {
+    return { logs: [] };
+  }
+};
+
+/** Progreso unificado del scraping (async o scheduler) para la barra del menú */
+export interface ScrapingProgressResponse {
+  running: boolean;
+  source?: string | null;
+  step?: string;
+  percentage?: number | null;
+  items_found?: number;
+  items_processed?: number;
+  current?: number;
+  total?: number;
+}
+
+const DEFAULT_SCRAPING_PROGRESS: ScrapingProgressResponse = {
+  running: false,
+  step: '',
+  percentage: null,
+  source: null,
+};
+
+/** Timeout corto para no bloquear el menú; si el backend tarda, se usa valor por defecto. */
+const SCRAPING_PROGRESS_TIMEOUT_MS = 5000;
+
+export const fetchScrapingProgress = async (): Promise<ScrapingProgressResponse> => {
+  try {
+    const response = await api.get<ScrapingProgressResponse>('/api/scraping/progress', {
+      timeout: SCRAPING_PROGRESS_TIMEOUT_MS,
+    });
+    return { ...DEFAULT_SCRAPING_PROGRESS, ...response.data };
+  } catch {
+    return DEFAULT_SCRAPING_PROGRESS;
+  }
 };
 
 // Capacitaciones API calls
