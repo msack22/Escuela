@@ -298,9 +298,34 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
         sampleUrls: posts.slice(0, 5).map((p) => p.postUrl),
       });
 
+      // Antes de visitar los detalles, consultamos la base para ver cuáles posts/URLs
+      // ya generaron concursos, y así evitar abrir de nuevo esas páginas.
+      const normalizeUrl = (url: string) => url.replace(/\/$/, "");
+      const existingFromFacebook = await prisma.contest.findMany({
+        where: { source_name: SOURCE_NAME },
+        select: { source_url: true },
+      });
+      const existingUrlSet = new Set(
+        existingFromFacebook
+          .map((c) => c.source_url)
+          .filter((u): u is string => typeof u === "string" && !!u)
+          .map((u) => normalizeUrl(u)),
+      );
+
       // Enriquecemos algunos posts visitando su página individual para obtener
       // el texto completo y links al CGE que sólo aparecen allí.
-      const postsToEnrich = posts.slice(0, 10);
+      const postsToEnrich = posts
+        .filter((p) => {
+          const candidateUrl = normalizeUrl(p.cgeUrl ?? p.postUrl);
+          if (existingUrlSet.has(candidateUrl)) {
+            facebookScraperLogger.info("Facebook scraper → post ya procesado previamente, se omite detalle", {
+              sourceUrl: candidateUrl,
+            });
+            return false;
+          }
+          return true;
+        })
+        .slice(0, 10);
       for (const p of postsToEnrich) {
         facebookScraperLogger.info("Facebook scraper → enriqueciendo post", {
           postUrl: p.postUrl,

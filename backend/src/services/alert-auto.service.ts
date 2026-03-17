@@ -62,9 +62,19 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, since:
   for (const alert of alerts) {
     const { subjects, departments } = parsePreferences(alert.subject_preferences);
 
+    // Normalizamos para comparación case-insensitive (y tolerar mayúsculas/minúsculas distintas).
+    const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+    const subjectSet =
+      subjects && subjects.length ? new Set(subjects.map((s) => norm(s))) : new Set<string>();
+    const departmentSet =
+      departments && departments.length ? new Set(departments.map((d) => norm(d))) : new Set<string>();
+
     const filtered = contests.filter((c) => {
-      const depOk = !departments.length || departments.includes(c.school.department);
-      const subjOk = !subjects.length || (c.subject && subjects.includes(c.subject.name));
+      const schoolDep = norm(c.school?.department);
+      const subjName = norm(c.subject?.name);
+
+      const depOk = !departmentSet.size || (schoolDep && departmentSet.has(schoolDep));
+      const subjOk = !subjectSet.size || (subjName && subjectSet.has(subjName));
       return depOk && subjOk;
     });
 

@@ -449,17 +449,35 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
   // (descripción detallada, horarios, etc.) antes de persistirlo.
   // Para cuidar el sitio del CGE cuando corremos varias veces al día,
   // limitamos la cantidad de notas individuales que visitamos por ciclo.
-  const MAX_ENRICH_PER_RUN = 60;
+  const MAX_ENRICH_PER_RUN = 200;
 
-  // Damos prioridad a los concursos más recientes:
+  // Damos prioridad a los concursos más recientes y a ciertos departamentos clave.
   // 1) filtramos por fecha mínima aceptada (cuando la conocemos)
-  // 2) ordenamos por publishedAt desc para que los últimos del sitio se procesen primero
+  // 2) ordenamos por prioridad de departamento y luego por publishedAt desc
   const candidateContests = contests.filter((c) => {
     if (!c.publishedAt) return true;
     return c.publishedAt >= minAcceptedDate;
   });
 
+  const PRIORITY_DEPARTMENTS = new Set<string>([
+    "islas del ibicuy",
+    "islas-del-ibicuy",
+    "gualeguaychú",
+    "gualeguaychu",
+    "gualeguay",
+  ]);
+
   candidateContests.sort((a, b) => {
+    const depA = (a.department ?? "").toLowerCase();
+    const depB = (b.department ?? "").toLowerCase();
+    const aPriority = PRIORITY_DEPARTMENTS.has(depA) ? 1 : 0;
+    const bPriority = PRIORITY_DEPARTMENTS.has(depB) ? 1 : 0;
+
+    if (aPriority !== bPriority) {
+      // Primero los concursos de departamentos prioritarios
+      return bPriority - aPriority;
+    }
+
     const ta = a.publishedAt ? a.publishedAt.getTime() : 0;
     const tb = b.publishedAt ? b.publishedAt.getTime() : 0;
     return tb - ta;
