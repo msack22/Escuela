@@ -140,7 +140,7 @@ const ScrapingStatus: React.FC = () => {
         <Alert
           type="warning"
           showIcon
-          message="Backend no disponible"
+          title="Backend no disponible"
           description="No se pudo conectar al servidor. Compruebe que la API esté en ejecución."
           style={{ marginBottom: 24 }}
         />

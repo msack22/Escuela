@@ -239,7 +239,7 @@ const AlertManagement: React.FC = () => {
           type="info"
           showIcon
           icon={<BellOutlined />}
-          message="¿Cuándo me llegan las notificaciones?"
+          title="¿Cuándo me llegan las notificaciones?"
           description={
             <>
               <Paragraph style={{ marginBottom: 0 }}>{notificationInfo.when_sent}</Paragraph>

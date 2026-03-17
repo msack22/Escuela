@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { isEmailConfigured } from "../config.js";
 import { emailNotifier } from "../infrastructure/email-notifier.js";
+import { sendWhatsappMessage } from "../infrastructure/whatsapp-web-notifier.js";
 import { appLogger } from "../lib/logger.js";
 
 type ParsedPrefs = { subjects: string[]; departments: string[] };
@@ -83,7 +84,8 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, since:
 
     const user = alert.user_id ? await db.user.findUnique({ where: { id: alert.user_id } }) : null;
     const email = ((alert.email_address || user?.email) ?? "").trim();
-    if (!email) continue;
+    const whatsapp = ((alert.whatsapp_number || user?.phone_number) ?? "").trim();
+    if (!email && !whatsapp) continue;
 
     const subject = `[Concursos] ${toNotify.length} nuevo(s) concurso(s) para tus filtros`;
     const html = toNotify
@@ -93,10 +95,10 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, since:
       )
       .join("");
 
-    let sent = false;
-    if (isEmailConfigured()) {
+    let emailSent = false;
+    if (email && isEmailConfigured()) {
       try {
-        sent = await emailNotifier.send({ to: email, subject, html });
+        emailSent = await emailNotifier.send({ to: email, subject, html });
       } catch (err) {
         appLogger.error("AlertAuto → failed to send email", {
           alertId: alert.id,
@@ -106,6 +108,30 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, since:
       }
     }
 
+    let whatsappSent = false;
+    if (whatsapp) {
+      try {
+        const formatDate = (d: Date | null) =>
+          d ? new Date(d).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
+        const lines = toNotify.map(
+          (c) =>
+            `• ${c.title} (${formatDate(c.publication_date ?? c.date)})\n  ${c.source_url}`
+        );
+        const preview = `[Concursos] ${toNotify.length} nuevo(s) concurso(s) para tus filtros:\n\n${lines.join("\n\n")}${email ? `\n\nTambién enviamos el detalle a ${email}.` : ""}`;
+        whatsappSent = await sendWhatsappMessage(whatsapp, preview);
+        if (whatsappSent) {
+          appLogger.info("AlertAuto → WhatsApp sent for alert", { alertId: alert.id, whatsapp });
+        }
+      } catch (err) {
+        appLogger.error("AlertAuto → failed to send WhatsApp", {
+          alertId: alert.id,
+          whatsapp,
+          error: (err as Error)?.message ?? String(err),
+        });
+      }
+    }
+
+    const sent = emailSent || whatsappSent;
     if (sent) {
       await db.contestNotificationSent.createMany({
         data: toNotify.map((c) => ({
@@ -118,7 +144,10 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, since:
 
       appLogger.info("AlertAuto → notifications sent for alert", {
         alertId: alert.id,
-        email,
+        email: email || null,
+        whatsapp: whatsapp || null,
+        emailSent,
+        whatsappSent,
         contests: toNotify.map((c) => c.id),
       });
     }

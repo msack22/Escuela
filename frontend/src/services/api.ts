@@ -193,8 +193,48 @@ api.interceptors.response.use(
 export const fetchAlerts = async () => {
   try {
     const response = await api.get('/api/alerts/');
-    const data = response.data;
-    return Array.isArray(data) ? data : (data?.results ?? data ?? []);
+    const raw = response.data;
+    const list: any[] = Array.isArray(raw) ? raw : raw?.results ?? raw ?? [];
+
+    // Normalizamos subject_preferences (string JSON) -> arrays para el frontend
+    return list.map((alert: any) => {
+      let subjects: string[] = [];
+      let departmentsFromPrefs: string[] = [];
+
+      const rawPrefs = alert.subject_preferences;
+      if (typeof rawPrefs === 'string' && rawPrefs.trim()) {
+        try {
+          const parsed = JSON.parse(rawPrefs);
+          if (Array.isArray(parsed)) {
+            // Formato viejo: ["Matemática", "Lengua"]
+            subjects = parsed.filter((x) => typeof x === 'string');
+          } else if (parsed && typeof parsed === 'object') {
+            // Formato nuevo: { subjects: [...], departments: [...] }
+            if (Array.isArray(parsed.subjects)) {
+              subjects = parsed.subjects.filter((x: unknown) => typeof x === 'string');
+            }
+            if (Array.isArray(parsed.departments)) {
+              departmentsFromPrefs = parsed.departments.filter(
+                (x: unknown) => typeof x === 'string',
+              );
+            }
+          }
+        } catch {
+          // Si falla el parseo, dejamos arrays vacíos y mostramos el string solo en la tabla cruda (si hiciera falta)
+        }
+      }
+
+      const mergedDepartments =
+        Array.isArray(alert.departments) && alert.departments.length
+          ? alert.departments
+          : departmentsFromPrefs;
+
+      return {
+        ...alert,
+        subject_preferences: subjects,
+        departments: mergedDepartments,
+      };
+    });
   } catch {
     return [];
   }
@@ -237,8 +277,8 @@ export const sendTestContestNotifications = async (
     limit?: number;
   }
 ) => {
-  const body = { ...params, alert_id: alertId };
-  const response = await api.post('/api/alert-meta/test-contest-notifications', body);
+  const body = { ...params };
+  const response = await api.post(`/api/alerts/${alertId}/test-contest-notifications`, body);
   return response.data;
 };
 

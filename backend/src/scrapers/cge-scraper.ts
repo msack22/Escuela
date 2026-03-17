@@ -140,21 +140,17 @@ function extractContestsFromSection(
       return;
     }
 
-    // Links de concursos: normalmente son enlaces a notas con "concurso", "suplencia" o "supervisor".
+    // En esta sección nos interesan todos los ítems con fecha y link al CGE.
+    // No filtramos por texto del título: cualquier enlace del dominio CGE con título válido cuenta.
     if ($el.is("a[href]")) {
       const href = $el.attr("href");
       const title = text;
       if (!href || !title || title.length < 5) return;
 
-      const normalizedTitle = title.toLowerCase();
-      const normalizedHref = href.toLowerCase();
-      const isContestLike =
-        /concurso|suplencia|supervisor/i.test(normalizedTitle) ||
-        /concurso|suplencia|supervisor/i.test(normalizedHref);
-
-      if (!isContestLike) return;
-
       const fullUrl = href.startsWith("http") ? href : new URL(href, baseUrl).href;
+      const isCgeLink = fullUrl.toLowerCase().includes("cge.entrerios.gov.ar");
+      // Ignorar anclas internas (solo #)
+      if (!isCgeLink || href.trim().startsWith("#")) return;
 
       contests.push({
         title,
@@ -166,7 +162,13 @@ function extractContestsFromSection(
     }
   });
 
-  return contests;
+  // Unificar por URL para no procesar dos veces el mismo concurso
+  const byUrl = new Map<string, ContestItem>();
+  for (const c of contests) {
+    const key = c.url.replace(/\/$/, "");
+    if (!byUrl.has(key)) byUrl.set(key, c);
+  }
+  return Array.from(byUrl.values());
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -236,6 +238,17 @@ function extractStructuredFieldsFromDescription(description?: string): {
 async function enrichContestWithDetails(contest: ContestItem, timeout: number): Promise<ContestItem> {
   try {
     const { html } = await fetchHtmlOptimized(contest.url, { timeout, minLength: 500 });
+
+    // Algunos sitios del CGE usan mecanismos de protección (Wordfence / rate limiting)
+    // que devuelven una página de bloqueo con este mensaje en lugar de la nota real.
+    // En esos casos, evitamos crear concursos con descripciones basura y sólo registramos un warning.
+    if (/Tu acceso a este sitio ha sido limitado por el propietario del sitio\./i.test(html)) {
+      appLogger.warn("CGE scraper → access limited page detected, skipping enrichment", {
+        url: contest.url,
+      });
+      return contest;
+    }
+
     const $ = parseHtml(html);
 
     const descriptionParts: string[] = [];
@@ -383,35 +396,84 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
       contestsForDep.push(...fallbackContests);
     }
 
-    allContests.push(...contestsForDep);
+    // Para cada departamento nos quedamos sólo con los concursos más recientes
+    // (top 20 ordenados por fecha descendente; si no hay fecha usamos 0).
+    const sortedForDep = [...contestsForDep].sort((a, b) => {
+      const ta = a.publishedAt ? a.publishedAt.getTime() : 0;
+      const tb = b.publishedAt ? b.publishedAt.getTime() : 0;
+      return tb - ta;
+    });
+    const topForDep = sortedForDep.slice(0, 20);
 
-    // Pausa entre departamentales para no saturar el sitio.
+    allContests.push(...topForDep);
+
+    // Pausa entre departamentales para no saturar ni ser bloqueados.
     if (i < DEPARTAMENTAL_PAGES.length - 1) {
-      const delay = 1500 + Math.floor(Math.random() * 1500);
+      // Antes: ~2,5–4,5 s. Ahora lo hacemos más “lento y amable” (~5–9 s).
+      const delay = 5000 + Math.floor(Math.random() * 4000);
       await sleep(delay);
     }
   }
 
-  const contests = allContests;
+  // Normalizamos URLs para evitar duplicados con y sin barra final.
+  const normalizeUrl = (url: string) => url.replace(/\/$/, "");
+
+  // Para evitar re-procesar (y re-visitar) notas individuales que ya están en la base,
+  // traemos los concursos del CGE que pertenecen al mes actual y construimos un set de URLs.
+  const startOfMonth = new Date();
+  startOfMonth.setDate(1);
+  startOfMonth.setHours(0, 0, 0, 0);
+
+  const existingThisMonth = await prisma.contest.findMany({
+    where: {
+      source_name: SOURCE_NAME,
+      date: { gte: startOfMonth },
+    },
+    select: { source_url: true },
+  });
+  const existingUrlSet = new Set(
+    existingThisMonth
+      .map((c) => c.source_url)
+      .filter((u): u is string => typeof u === "string" && !!u)
+      .map((u) => normalizeUrl(u)),
+  );
+
+  // Nos quedamos sólo con concursos que no estén ya en la base (para este mes),
+  // así no volvemos a entrar a páginas de detalle repetidas.
+  const contests = allContests.filter((c) => !existingUrlSet.has(normalizeUrl(c.url)));
 
   let created = 0;
   const fallbackDate = new Date();
 
   // Enriquecemos cada concurso con la información de la nota individual
   // (descripción detallada, horarios, etc.) antes de persistirlo.
-  const enrichedContests: ContestItem[] = [];
-  for (const c of contests.slice(0, 100)) {
-    // Saltamos concursos demasiado antiguos cuando hay fecha conocida,
-    // y de paso evitamos hacer requests innecesarias a sus notas individuales.
-    if (c.publishedAt && c.publishedAt < minAcceptedDate) {
-      continue;
-    }
+  // Para cuidar el sitio del CGE cuando corremos varias veces al día,
+  // limitamos la cantidad de notas individuales que visitamos por ciclo.
+  const MAX_ENRICH_PER_RUN = 60;
 
+  // Damos prioridad a los concursos más recientes:
+  // 1) filtramos por fecha mínima aceptada (cuando la conocemos)
+  // 2) ordenamos por publishedAt desc para que los últimos del sitio se procesen primero
+  const candidateContests = contests.filter((c) => {
+    if (!c.publishedAt) return true;
+    return c.publishedAt >= minAcceptedDate;
+  });
+
+  candidateContests.sort((a, b) => {
+    const ta = a.publishedAt ? a.publishedAt.getTime() : 0;
+    const tb = b.publishedAt ? b.publishedAt.getTime() : 0;
+    return tb - ta;
+  });
+
+  const enrichedContests: ContestItem[] = [];
+  for (const c of candidateContests.slice(0, MAX_ENRICH_PER_RUN)) {
     const enriched = await enrichContestWithDetails(c, timeout);
     enrichedContests.push(enriched);
 
-    // Pequeña pausa para no saturar el sitio al pedir notas individuales.
-    await sleep(200);
+    // Pausa entre link y link para no saturar ni ser bloqueados por la web.
+    // Antes: ~1,5–3 s. Ahora: ~3–5 s.
+    const delayMs = 3000 + Math.floor(Math.random() * 2000);
+    await sleep(delayMs);
   }
 
   for (const c of enrichedContests) {

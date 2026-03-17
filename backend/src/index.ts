@@ -13,6 +13,7 @@ import { schedulerRoutes } from "./routes/scheduler.js";
 import { usersRoutes } from "./routes/users.js";
 import { logsRoutes } from "./routes/logs.js";
 import { adminRoutes } from "./routes/admin.js";
+import { schedulerService } from "./services/scheduler.service.js";
 
 const app = Fastify({ logger: { level: config.LOG_LEVEL } });
 app.decorate("prisma", prisma);
@@ -48,6 +49,9 @@ async function start() {
     const msg = `Backend Node.js escuchando en http://${config.HOST}:${config.PORT}. Logs en ${getLogsDir()}`;
     app.log.info(msg);
     appLogger.info(msg);
+
+    // Activar scheduler automático al iniciar el backend
+    schedulerService.setRunning(true);
   } catch (err) {
     appLogger.error("Error al iniciar", { error: String(err) });
     app.log.error(err);

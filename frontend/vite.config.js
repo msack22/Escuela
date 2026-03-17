@@ -20,6 +20,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    chunkSizeWarningLimit: 800,
   },
   optimizeDeps: {
     include: ['@mui/material', '@mui/icons-material', '@emotion/react', '@emotion/styled'],

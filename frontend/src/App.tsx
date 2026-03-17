@@ -1,17 +1,17 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Routes, Route } from 'react-router-dom';
-import { Layout, Alert, ConfigProvider, theme } from 'antd';
+import { Layout, Alert, ConfigProvider, theme, Spin } from 'antd';
 import esES from 'antd/locale/es_ES';
 import { useQuery } from '@tanstack/react-query';
 import { fetchSystemStatus } from './services/api';
 
 import Navbar from './components/Navbar/Navbar';
-import ContestList from './pages/ContestList/ContestList';
-import AlertManagement from './pages/AlertManagement/AlertManagement';
-import Dashboard from './pages/Dashboard/Dashboard';
-import ScrapingControl from './pages/ScrapingControl/ScrapingControl';
-// import CapacitacionesPage from './pages/Capacitaciones/CapacitacionesPage';
-import UserManagement from './pages/UserManagement/UserManagement';
+
+const Dashboard = lazy(() => import('./pages/Dashboard/Dashboard'));
+const ContestList = lazy(() => import('./pages/ContestList/ContestList'));
+const ScrapingControl = lazy(() => import('./pages/ScrapingControl/ScrapingControl'));
+const AlertManagement = lazy(() => import('./pages/AlertManagement/AlertManagement'));
+const UserManagement = lazy(() => import('./pages/UserManagement/UserManagement'));
 
 function App() {
   const { data: systemStatus } = useQuery({
@@ -50,14 +50,15 @@ function App() {
           />
         )}
         <Layout.Content style={{ padding: 24, background: '#111827' }}>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/contests" element={<ContestList />} />
-            <Route path="/scraping" element={<ScrapingControl />} />
-            <Route path="/alerts" element={<AlertManagement />} />
-            <Route path="/users" element={<UserManagement />} />
-            {/* <Route path="/capacitaciones" element={<CapacitacionesPage />} /> */}
-          </Routes>
+          <Suspense fallback={<div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spin size="large" /></div>}>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/contests" element={<ContestList />} />
+              <Route path="/scraping" element={<ScrapingControl />} />
+              <Route path="/alerts" element={<AlertManagement />} />
+              <Route path="/users" element={<UserManagement />} />
+            </Routes>
+          </Suspense>
         </Layout.Content>
       </Layout>
     </ConfigProvider>
