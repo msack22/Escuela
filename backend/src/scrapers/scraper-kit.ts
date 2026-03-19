@@ -11,6 +11,7 @@ import axios, { type AxiosRequestConfig } from "axios";
 import * as cheerio from "cheerio";
 import { chromium } from "playwright";
 import puppeteer from "puppeteer";
+import { SocksProxyAgent } from "socks-proxy-agent";
 
 const DEFAULT_HEADERS = {
   "User-Agent":
@@ -21,10 +22,13 @@ const DEFAULT_HEADERS = {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+/** Configuración de proxy Tor (SOCKS5). */
+const TOR_PROXY_URL = process.env.TOR_PROXY_URL || "socks5://127.0.0.1:9050";
+
 /** Descarga HTML con axios (rápido, para páginas estáticas). */
 export async function fetchWithAxios(
   url: string,
-  options: { timeout?: number; headers?: Record<string, string> } = {}
+  options: { timeout?: number; headers?: Record<string, string>; useTor?: boolean } = {}
 ): Promise<string> {
   const config: AxiosRequestConfig = {
     url,
@@ -35,6 +39,13 @@ export async function fetchWithAxios(
     maxRedirects: 5,
     validateStatus: (status) => status >= 200 && status < 400,
   };
+
+  // Si se solicita usar Tor, configuramos el agente SOCKS5.
+  if (options.useTor) {
+    config.httpAgent = new SocksProxyAgent(TOR_PROXY_URL);
+    config.httpsAgent = new SocksProxyAgent(TOR_PROXY_URL);
+  }
+
   const res = await axios(config);
   return res.data as string;
 }
@@ -51,6 +62,7 @@ export interface BrowserFetchOptions {
   timeout?: number;
   waitUntil?: "load" | "domcontentloaded" | "networkidle";
   engine?: BrowserEngine;
+  useTor?: boolean;
 }
 
 /** Descarga HTML con Playwright (Chrome). */
@@ -60,8 +72,10 @@ export async function fetchWithPlaywright(
 ): Promise<string> {
   const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
   const waitUntil = options.waitUntil ?? "domcontentloaded";
+  const useTor = options.useTor ?? false;
   const browser = await chromium.launch({
     headless: true,
+    proxy: useTor ? { server: TOR_PROXY_URL } : undefined,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
   try {
@@ -81,9 +95,15 @@ export async function fetchWithPuppeteer(
   options: BrowserFetchOptions = {}
 ): Promise<string> {
   const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
+  const useTor = options.useTor ?? false;
   const browser = await puppeteer.launch({
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      ...(useTor ? [`--proxy-server=${TOR_PROXY_URL}`] : []),
+    ],
   });
   try {
     const page = await browser.newPage();
@@ -117,13 +137,15 @@ export async function fetchHtmlOptimized(
     timeout?: number;
     engine?: BrowserEngine;
     minLength?: number; // si el HTML tiene menos caracteres, considerar vacío y usar browser
+    useTor?: boolean;
   } = {}
 ): Promise<{ html: string; via: "axios" | "playwright" | "puppeteer" }> {
   const minLength = options.minLength ?? 500;
   const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
+  const useTor = options.useTor ?? true;
 
   try {
-    const html = await fetchWithAxios(url, { timeout });
+    const html = await fetchWithAxios(url, { timeout, useTor });
     if (html.length >= minLength) {
       return { html, via: "axios" };
     }
@@ -132,6 +154,6 @@ export async function fetchHtmlOptimized(
   }
 
   const engine = options.engine ?? "playwright";
-  const browserHtml = await fetchWithBrowser(url, { timeout, engine });
+  const browserHtml = await fetchWithBrowser(url, { timeout, engine, useTor });
   return { html: browserHtml, via: engine };
 }

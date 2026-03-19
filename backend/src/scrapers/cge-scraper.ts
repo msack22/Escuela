@@ -9,17 +9,13 @@ import {
   fetchHtmlOptimized,
   type BrowserEngine,
 } from "./scraper-kit.js";
+import { changeTorIp, getCurrentTorIp } from "../lib/tor-manager.js";
 
 const BASE_URL = "https://cge.entrerios.gov.ar";
 const SOURCE_NAME = "CGE Entre Ríos Simple";
 
 const DEPARTAMENTAL_PAGES: Array<{ slug: string; department: string }> = [
-  { slug: "colon", department: "colón" },
-  { slug: "concordia", department: "concordia" },
-  { slug: "diamante", department: "diamante" },
-  { slug: "federacion", department: "federación" },
-  { slug: "federal", department: "federal" },
-  { slug: "feliciano", department: "feliciano" },
+  
   { slug: "gualeguay", department: "gualeguay" },
   { slug: "gualeguaychu", department: "gualeguaychú" },
   { slug: "islas-del-ibicuy", department: "islas del ibicuy" },
@@ -276,7 +272,7 @@ function extractStructuredFieldsFromDescription(description?: string): {
  */
 async function enrichContestWithDetails(contest: ContestItem, timeout: number): Promise<ContestItem> {
   try {
-    const { html } = await fetchHtmlOptimized(contest.url, { timeout, minLength: 500 });
+    const { html } = await fetchHtmlOptimized(contest.url, { timeout, minLength: 500, useTor: true });
 
     // Algunos sitios del CGE usan mecanismos de protección (Wordfence / rate limiting)
     // que devuelven una página de bloqueo con este mensaje en lugar de la nota real.
@@ -366,18 +362,19 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
         timeout,
         engine,
         minLength: 500,
+        useTor: true,
       });
       html = result.html;
-      cgeScraperLogger.info("CGE scraper → fetched HTML (optimized)", {
+      cgeScraperLogger.info("CGE scraper → fetched HTML (optimized via Tor)", {
         url: depBaseUrl,
         via: result.via,
         length: html.length,
       });
     } else {
       if (engine === "puppeteer") {
-        html = await fetchWithPuppeteer(depBaseUrl, { timeout, waitUntil: "domcontentloaded" });
+        html = await fetchWithPuppeteer(depBaseUrl, { timeout, waitUntil: "domcontentloaded", useTor: true });
       } else {
-        html = await fetchWithPlaywright(depBaseUrl, { timeout, waitUntil: "domcontentloaded" });
+        html = await fetchWithPlaywright(depBaseUrl, { timeout, waitUntil: "domcontentloaded", useTor: true });
       }
       cgeScraperLogger.info("CGE scraper → fetched HTML (browser)", {
         url: depBaseUrl,
@@ -547,6 +544,17 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
 
     const enriched = await enrichContestWithDetails(c, timeout);
     enrichedContests.push(enriched);
+
+    // Cambiamos de IP cada 5 concursos para evitar bloqueos.
+    if ((idx + 1) % 5 === 0) {
+      try {
+        await changeTorIp();
+        const newIp = await getCurrentTorIp();
+        cgeScraperLogger.info("CGE scraper → changed Tor IP", { newIp });
+      } catch (err) {
+        cgeScraperLogger.warn("CGE scraper → failed to change Tor IP", { error: (err as Error)?.message });
+      }
+    }
 
     // Pausa entre link y link para no saturar ni ser bloqueados por la web.
     // Antes: ~1,5–3 s. Ahora: ~3–5 s.

@@ -4,6 +4,7 @@ import path from "path";
 import { appLogger, facebookScraperLogger } from "../lib/logger.js";
 
 const SOURCE_NAME = "Facebook CGE Entre Ríos";
+const TOR_PROXY_URL = process.env.TOR_PROXY_URL || "socks5://127.0.0.1:9050";
 
 // Páginas iniciales de Entre Ríos (se pueden ir sumando más)
 const FACEBOOK_PAGES: string[] = ["https://www.facebook.com/ddeislasdelibicuy"];
@@ -24,6 +25,7 @@ async function createBrowser(): Promise<Browser> {
   // Usamos perfil persistente para que el usuario pueda iniciar sesión una sola vez.
   const context = await chromium.launchPersistentContext(FB_USER_DATA_DIR, {
     headless: false,
+    proxy: { server: TOR_PROXY_URL },
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
   // Compatibilizamos el tipo Browser usando el propio contexto, que expone newPage/close.
