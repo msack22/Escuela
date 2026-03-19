@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { config } from "../config.js";
-import { appLogger } from "../lib/logger.js";
+import { appLogger, cgeScraperLogger } from "../lib/logger.js";
 import {
   fetchWithAxios,
   fetchWithPlaywright,
@@ -106,9 +106,15 @@ function extractContestsFromSection(
   const contests: ContestItem[] = [];
 
   // Ancla principal de la sección. Si no existe, caemos al extractor genérico.
-  const anchor = $(`#${opts.anchorId}`);
+  // En el CGE, las secciones suelen marcarse con `data-hash="concursos-nivel-..."` (y a veces también con `id`).
+  const anchorById = $(`#${opts.anchorId}`);
+  const anchorByDataHash = $(`[data-hash="${opts.anchorId}"]`);
+  const anchor = anchorById.length ? anchorById : anchorByDataHash;
   if (anchor.length === 0) {
-    return extractContestsFromHtml(html, baseUrl, opts.department);
+    // Si no encontramos el contenedor de la sección de concursos por nivel,
+    // en esta estrategia evitamos el fallback genérico (para no "levantarnos"
+    // links que no corresponden al listado por departamento).
+    return [];
   }
 
   // Buscamos en el contenedor de la sección (padre más cercano "grande").
@@ -152,6 +158,21 @@ function extractContestsFromSection(
       // Ignorar anclas internas (solo #)
       if (!isCgeLink || href.trim().startsWith("#")) return;
 
+      // Evitar links que existan dentro del contenedor pero no correspondan
+      // a convocatorias/concursos (ej: navegación/otros).
+      const titleLower = title.toLowerCase();
+      const urlLower = fullUrl.toLowerCase();
+      const looksLikeContest =
+        /concurso|oposicion|oposición|cargo|convocatoria|opositor/i.test(titleLower) ||
+        /concurso|oposicion|oposici|cargo|convocatoria/i.test(urlLower);
+      if (!looksLikeContest) return;
+
+      // Permitir sólo URLs de "post" del CGE con patrón /YYYY/MM/...
+      // Esto evita que por algún cambio del template agarremos links como "/" o "/noticias/".
+      const isCgePostUrl = /\/\d{4}\/\d{2}\//.test(fullUrl);
+      const isNoticias = urlLower.includes("/noticias/");
+      if (!isCgePostUrl || isNoticias) return;
+
       contests.push({
         title,
         url: fullUrl,
@@ -173,6 +194,24 @@ function extractContestsFromSection(
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getArgentinaYearMonth(d: Date): { year: number; month2: string } {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+  });
+  const parts = fmt.formatToParts(d);
+  const year = Number.parseInt(parts.find((p) => p.type === "year")?.value ?? "0", 10) || d.getFullYear();
+  const month2 = parts.find((p) => p.type === "month")?.value ?? String(d.getMonth() + 1).padStart(2, "0");
+  return { year, month2 };
+}
+
+function previousMonthYearMonth(year: number, month2: string): { year: number; month2: string } {
+  const month = Number.parseInt(month2, 10) || 1;
+  if (month > 1) return { year, month2: String(month - 1).padStart(2, "0") };
+  return { year: year - 1, month2: "12" };
 }
 
 /**
@@ -243,7 +282,7 @@ async function enrichContestWithDetails(contest: ContestItem, timeout: number): 
     // que devuelven una página de bloqueo con este mensaje en lugar de la nota real.
     // En esos casos, evitamos crear concursos con descripciones basura y sólo registramos un warning.
     if (/Tu acceso a este sitio ha sido limitado por el propietario del sitio\./i.test(html)) {
-      appLogger.warn("CGE scraper → access limited page detected, skipping enrichment", {
+      cgeScraperLogger.warn("CGE scraper → access limited page detected, skipping enrichment", {
         url: contest.url,
       });
       return contest;
@@ -282,7 +321,7 @@ async function enrichContestWithDetails(contest: ContestItem, timeout: number): 
       }
     }
   } catch (err) {
-    appLogger.warn("CGE scraper → failed to enrich contest details", {
+    cgeScraperLogger.warn("CGE scraper → failed to enrich contest details", {
       url: contest.url,
       error: (err as Error)?.message ?? String(err),
     });
@@ -294,9 +333,15 @@ async function enrichContestWithDetails(contest: ContestItem, timeout: number): 
 export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
   const timeout = config.SCRAPING_TIMEOUT_MS ?? 60000;
   const engine = config.SCRAPING_ENGINE as BrowserEngine;
-  // Solo conservar concursos de los últimos 2 días (desde el momento de ejecución).
-  const minAcceptedDate = new Date();
-  minAcceptedDate.setDate(minAcceptedDate.getDate() - 2);
+  // Solo conservar concursos de "ayer + hoy" (según la fecha visible en el listado del CGE).
+  // Importante: normalizamos a inicio/fin del día para no depender de la hora actual.
+  const now = new Date();
+  const minAcceptedDate = new Date(now);
+  minAcceptedDate.setDate(minAcceptedDate.getDate() - 1);
+  minAcceptedDate.setHours(0, 0, 0, 0);
+
+  const maxAcceptedDate = new Date(now);
+  maxAcceptedDate.setHours(23, 59, 59, 999);
 
   const allContests: ContestItem[] = [];
 
@@ -305,34 +350,43 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
 
     let contestsForDep: ContestItem[] = [];
 
-    // Para cada nivel navegamos explícitamente a la URL con hash,
-    // así el front del CGE puede usar location.hash para cargar/filtrar contenidos.
-    for (const section of LEVEL_SECTIONS) {
-      const urlWithHash = `${BASE_URL}/departamental-${dep.slug}/#${section.id}`;
+    // Fetch UNA sola vez la página del DDE y desde ese mismo HTML extraemos
+    // `secundario`, `superior` y `supervisor` (sin visitar 3 veces el mismo departamento).
+    const depBaseUrl = `${BASE_URL}/departamental-${dep.slug}`;
+    cgeScraperLogger.info("CGE scraper → fetching departamental page (all levels)", {
+      url: depBaseUrl,
+      department: dep.department,
+      slug: dep.slug,
+      engine,
+    });
 
-      appLogger.info("CGE scraper → fetching departamental section", {
-        url: urlWithHash,
-        department: dep.department,
-        slug: dep.slug,
-        level: section.level,
-        anchorId: section.id,
+    let html: string;
+    if (config.SCRAPING_PREFER_HTTP) {
+      const result = await fetchHtmlOptimized(depBaseUrl, {
+        timeout,
         engine,
+        minLength: 500,
       });
-
-      // Forzamos navegador porque axios ignora el hash y no ejecuta JS.
-      let html: string;
+      html = result.html;
+      cgeScraperLogger.info("CGE scraper → fetched HTML (optimized)", {
+        url: depBaseUrl,
+        via: result.via,
+        length: html.length,
+      });
+    } else {
       if (engine === "puppeteer") {
-        html = await fetchWithPuppeteer(urlWithHash, { timeout, waitUntil: "networkidle" });
+        html = await fetchWithPuppeteer(depBaseUrl, { timeout, waitUntil: "domcontentloaded" });
       } else {
-        html = await fetchWithPlaywright(urlWithHash, { timeout, waitUntil: "networkidle" });
+        html = await fetchWithPlaywright(depBaseUrl, { timeout, waitUntil: "domcontentloaded" });
       }
-
-      appLogger.info("CGE scraper → fetched HTML (browser section)", {
-        url: urlWithHash,
+      cgeScraperLogger.info("CGE scraper → fetched HTML (browser)", {
+        url: depBaseUrl,
         engine,
         length: html.length,
       });
+    }
 
+    for (const section of LEVEL_SECTIONS) {
       const contests = extractContestsFromSection(html, BASE_URL, {
         anchorId: section.id,
         department: dep.department,
@@ -341,8 +395,8 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
       });
       contestsForDep.push(...contests);
 
-      appLogger.info("CGE scraper → contests found in section", {
-        url: urlWithHash,
+      cgeScraperLogger.info("CGE scraper → contests found in section", {
+        url: depBaseUrl,
         department: dep.department,
         level: section.level,
         anchorId: section.id,
@@ -350,50 +404,13 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
       });
     }
 
-    // Si ninguna sección devolvió concursos, usamos el extractor genérico en la página base.
+    // No usamos fallback genérico: si una DDE no devuelve nada en las secciones,
+    // asumimos que el HTML no trae esos listados y la omitimos para evitar ruido.
     if (contestsForDep.length === 0) {
-      const baseUrl = `${BASE_URL}/departamental-${dep.slug}`;
-
-      appLogger.info("CGE scraper → fetching departamental page for fallback", {
-        url: baseUrl,
+      cgeScraperLogger.warn("CGE scraper → no contests in structured sections (skipping)", {
+        url: depBaseUrl,
         department: dep.department,
-        slug: dep.slug,
-        engine,
       });
-
-      let html: string;
-      if (config.SCRAPING_PREFER_HTTP) {
-        const result = await fetchHtmlOptimized(baseUrl, {
-          timeout,
-          engine,
-          minLength: 500,
-        });
-        html = result.html;
-        appLogger.info("CGE scraper → fetched HTML (optimized fallback)", {
-          url: baseUrl,
-          via: result.via,
-          length: html.length,
-        });
-      } else {
-        if (engine === "puppeteer") {
-          html = await fetchWithPuppeteer(baseUrl, { timeout, waitUntil: "domcontentloaded" });
-        } else {
-          html = await fetchWithPlaywright(baseUrl, { timeout, waitUntil: "domcontentloaded" });
-        }
-        appLogger.info("CGE scraper → fetched HTML (browser fallback)", {
-          url: baseUrl,
-          engine,
-          length: html.length,
-        });
-      }
-
-      const fallbackContests = extractContestsFromHtml(html, BASE_URL, dep.department);
-      appLogger.warn("CGE scraper → no contests in structured sections, using generic extractor", {
-        url: baseUrl,
-        department: dep.department,
-        fallbackCount: fallbackContests.length,
-      });
-      contestsForDep.push(...fallbackContests);
     }
 
     // Para cada departamento nos quedamos sólo con los concursos más recientes
@@ -449,15 +466,42 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
   // (descripción detallada, horarios, etc.) antes de persistirlo.
   // Para cuidar el sitio del CGE cuando corremos varias veces al día,
   // limitamos la cantidad de notas individuales que visitamos por ciclo.
-  const MAX_ENRICH_PER_RUN = 200;
+  const MAX_ENRICH_PER_RUN = 100;
 
   // Damos prioridad a los concursos más recientes y a ciertos departamentos clave.
   // 1) filtramos por fecha mínima aceptada (cuando la conocemos)
-  // 2) ordenamos por prioridad de departamento y luego por publishedAt desc
+  // 2) antes filtrábamos siempre por el mes de la URL para evitar notas viejas,
+  //    pero algunos concursos "de hoy" pueden estar publicados con fecha distinta
+  //    en la URL (WordPress agrupa por fecha de publicación del post).
+  //    Ahora: si tenemos `publishedAt` usamos esa fecha; si no existe, caemos
+  //    al filtro por mes en la URL para reducir ruido.
+  // 3) ordenamos por prioridad de departamento y luego por publishedAt desc
   const candidateContests = contests.filter((c) => {
-    if (!c.publishedAt) return true;
-    return c.publishedAt >= minAcceptedDate;
+    // Si no podemos parsear la fecha del listado, no entra (evita ruido viejo).
+    if (!c.publishedAt) return false;
+    return c.publishedAt >= minAcceptedDate && c.publishedAt <= maxAcceptedDate;
   });
+
+  const { year: currentYear, month2: currentMonth2 } = getArgentinaYearMonth(new Date());
+  const allowedFragments = [`/${currentYear}/${currentMonth2}/`];
+
+  // Doble validación:
+  // 1) `publishedAt` dentro de "ayer + hoy" (filtro de fecha)
+  // 2) la `url` también debe estar dentro del mes/año actual (filtro por URL)
+  const filteredByUrl = candidateContests.filter((c) => {
+    const url = c.url ?? "";
+    if (!url) return false;
+    if (url.includes("jurado-de-concursos-noticias")) return false;
+    return allowedFragments.some((frag) => url.includes(frag));
+  });
+
+  if (filteredByUrl.length !== candidateContests.length) {
+    cgeScraperLogger.info("CGE scraper → URL month filter applied", {
+      allowed: allowedFragments,
+      before: candidateContests.length,
+      after: filteredByUrl.length,
+    });
+  }
 
   const PRIORITY_DEPARTMENTS = new Set<string>([
     "islas del ibicuy",
@@ -467,7 +511,7 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
     "gualeguay",
   ]);
 
-  candidateContests.sort((a, b) => {
+  filteredByUrl.sort((a, b) => {
     const depA = (a.department ?? "").toLowerCase();
     const depB = (b.department ?? "").toLowerCase();
     const aPriority = PRIORITY_DEPARTMENTS.has(depA) ? 1 : 0;
@@ -484,7 +528,23 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
   });
 
   const enrichedContests: ContestItem[] = [];
-  for (const c of candidateContests.slice(0, MAX_ENRICH_PER_RUN)) {
+  const toEnrich = filteredByUrl.slice(0, MAX_ENRICH_PER_RUN);
+  cgeScraperLogger.info("CGE scraper → enriching details", {
+    count: toEnrich.length,
+    max: MAX_ENRICH_PER_RUN,
+    priority_departments: Array.from(PRIORITY_DEPARTMENTS),
+  });
+
+  for (let idx = 0; idx < toEnrich.length; idx++) {
+    const c = toEnrich[idx];
+    if ((idx + 1) % 10 === 0 || idx === 0 || idx === toEnrich.length - 1) {
+      cgeScraperLogger.info("CGE scraper → progress", {
+        current: idx + 1,
+        total: toEnrich.length,
+        url: c.url,
+      });
+    }
+
     const enriched = await enrichContestWithDetails(c, timeout);
     enrichedContests.push(enriched);
 
@@ -494,16 +554,47 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
     await sleep(delayMs);
   }
 
+  cgeScraperLogger.info("CGE scraper → enrichment finished", {
+    enriched: enrichedContests.length,
+    planned: toEnrich.length,
+  });
+
   for (const c of enrichedContests) {
+    // Normalizamos nombre y slug de departamento para usar tabla Department.
+    const rawDep = c.department || "Sin departamento";
+    const canonicalName = rawDep
+      .split(" ")
+      .filter(Boolean)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(" ");
+    const slug = canonicalName
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, "-");
+
+    let department = await prisma.department.findFirst({
+      where: { OR: [{ slug }, { name: canonicalName }] },
+    });
+    if (!department) {
+      department = await prisma.department.create({
+        data: { name: canonicalName, slug },
+      });
+    }
+
     let school = await prisma.school.findFirst({
-      where: { department: c.department, city: { contains: c.department } },
+      where: {
+        department_id: department.id,
+        city: { contains: c.department },
+      },
     });
     if (!school) {
       school = await prisma.school.create({
         data: {
-          name: `CGE ${c.department}`,
-          city: c.department,
-          department: c.department,
+          name: `CGE ${canonicalName}`,
+          city: canonicalName,
+          department: canonicalName,
+          department_id: department.id,
         },
       });
     }

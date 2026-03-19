@@ -12,7 +12,10 @@ model School {
   id             Int      @id @default(autoincrement())
   name           String   @db.VarChar(255)
   city           String   @db.VarChar(100)
+  /// Departamento como texto plano (compatibilidad hacia atrás).
   department     String   @db.VarChar(100)
+  /// Departamento normalizado (tabla de referencia). Opcional para no romper datos existentes.
+  department_id  Int?
   address        String?  @db.Text
   latitude       Float?
   longitude      Float?
@@ -24,7 +27,8 @@ model School {
   created_at     DateTime @default(now())
   updated_at     DateTime? @updatedAt
 
-  contests Contest[]
+  contests   Contest[]
+  departmentRef Department? @relation(fields: [department_id], references: [id])
 
   @@map("schools")
 }
@@ -119,6 +123,19 @@ model ContestNotificationSent {
 
   @@unique([alert_id, contest_id])
   @@map("contest_notification_sent")
+}
+
+/// Tabla de departamentos normalizada.
+model Department {
+  id   Int    @id @default(autoincrement())
+  /// Nombre canónico, con mayúsculas correctas (ej. "Islas del Ibicuy").
+  name String @unique @db.VarChar(100)
+  /// Slug estable para uso interno (ej. "islas-del-ibicuy").
+  slug String @unique @db.VarChar(100)
+
+  schools School[]
+
+  @@map("departments")
 }
 
 model ScrapingLog {

@@ -173,7 +173,17 @@ export const contestSearchService = {
   },
 
   async getAllDepartments(): Promise<string[]> {
-    const rows = await prisma.school.findMany({ select: { department: true }, distinct: ["department"] });
+    // Preferimos la tabla Department normalizada. Si no hay filas (instalación vieja),
+    // caemos al listado por escuelas.
+    const depRows = await prisma.department.findMany({ select: { name: true }, orderBy: { name: "asc" } });
+    if (depRows.length > 0) {
+      return depRows.map((d) => d.name).filter(Boolean) as string[];
+    }
+
+    const rows = await prisma.school.findMany({
+      select: { department: true },
+      distinct: ["department"],
+    });
     return rows.map((r) => r.department).filter(Boolean) as string[];
   },
 

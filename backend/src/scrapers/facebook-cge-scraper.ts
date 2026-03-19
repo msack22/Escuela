@@ -227,7 +227,41 @@ async function enrichPostFromDetails(browser: Browser, post: FacebookPost): Prom
       const el = container as HTMLElement;
       const fullText = el?.innerText?.trim() ?? "";
 
-      let cgeLink: string | undefined;
+      let bestCgeLink: string | undefined;
+      let bestScore = -Infinity;
+
+      const scoreCgeHref = (href: string) => {
+        try {
+          const url = new URL(href);
+          const path = url.pathname.toLowerCase();
+
+          // Descartamos explícitamente cosas que no son concursos.
+          if (path.includes("/noticias/") || path.includes("noticias")) return -1000;
+          if (path.includes("feriadecarrerasyoficios")) return -1000;
+
+          const looksLikeContest =
+            path.includes("concurso") ||
+            path.includes("oposicion") ||
+            path.includes("oposición") ||
+            path.includes("convocatoria") ||
+            path.includes("llamado");
+          if (!looksLikeContest) return -200;
+
+          let score = 0;
+          if (path.includes("convocatoria-concurso")) score += 60;
+          if (path.includes("llamado-a-concurso")) score += 50;
+          if (path.includes("escuela")) score += 5;
+          if (path.includes("secundaria")) score += 5;
+
+          // Priorizamos enlaces que incluyan ruta /YYYY/MM/
+          if (/\/\d{4}\/\d{2}\//.test(path)) score += 10;
+
+          return score;
+        } catch {
+          return -200;
+        }
+      };
+
       const anchors = Array.from(el.querySelectorAll("a")) as HTMLAnchorElement[];
       for (const a of anchors) {
         let href = a.href || "";
@@ -246,19 +280,21 @@ async function enrichPostFromDetails(browser: Browser, post: FacebookPost): Prom
         }
 
         if (href.toLowerCase().includes("cge.entrerios.gov.ar")) {
-          cgeLink = href;
+          const score = scoreCgeHref(href);
+          if (score > bestScore) {
+            bestScore = score;
+            bestCgeLink = href;
+          }
         }
       }
 
-      return { text: fullText, cgeUrl: cgeLink };
+      return { text: fullText, cgeUrl: bestCgeLink };
     });
 
     if (text) {
       post.text = text;
     }
-    if (cgeUrl && !post.cgeUrl) {
-      post.cgeUrl = cgeUrl;
-    }
+    if (cgeUrl) post.cgeUrl = cgeUrl;
 
     await detailPage.close();
   } catch (err) {
@@ -277,6 +313,16 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
 
   const browser = await createBrowser();
   let created = 0;
+
+  // Normalizamos URLs para deduplicación consistente:
+  // - Quitamos query params (ej. fbclid)
+  // - Quitamos fragmentos
+  // - Quitamos slash final
+  const normalizeCgeUrl = (url: string) =>
+    String(url)
+      .split("#")[0]
+      .split("?")[0]
+      .replace(/\/$/, "");
 
   try {
     for (const pageUrl of FACEBOOK_PAGES) {
@@ -300,7 +346,6 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
 
       // Antes de visitar los detalles, consultamos la base para ver cuáles posts/URLs
       // ya generaron concursos, y así evitar abrir de nuevo esas páginas.
-      const normalizeUrl = (url: string) => url.replace(/\/$/, "");
       const existingFromFacebook = await prisma.contest.findMany({
         where: { source_name: SOURCE_NAME },
         select: { source_url: true },
@@ -309,14 +354,14 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
         existingFromFacebook
           .map((c) => c.source_url)
           .filter((u): u is string => typeof u === "string" && !!u)
-          .map((u) => normalizeUrl(u)),
+          .map((u) => normalizeCgeUrl(u)),
       );
 
       // Enriquecemos algunos posts visitando su página individual para obtener
       // el texto completo y links al CGE que sólo aparecen allí.
       const postsToEnrich = posts
         .filter((p) => {
-          const candidateUrl = normalizeUrl(p.cgeUrl ?? p.postUrl);
+          const candidateUrl = normalizeCgeUrl(p.cgeUrl ?? p.postUrl);
           if (existingUrlSet.has(candidateUrl)) {
             facebookScraperLogger.info("Facebook scraper → post ya procesado previamente, se omite detalle", {
               sourceUrl: candidateUrl,
@@ -343,10 +388,29 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
       const defaultDate = new Date();
       defaultDate.setMonth(defaultDate.getMonth() + 1);
 
-      let school = await prisma.school.findFirst({ where: { name: "Facebook CGE" } });
+      // Departamento genérico para concursos provenientes de Facebook.
+      const depName = "Entre Ríos";
+      const depSlug = "entre-rios";
+      let department = await prisma.department.findFirst({
+        where: { OR: [{ slug: depSlug }, { name: depName }] },
+      });
+      if (!department) {
+        department = await prisma.department.create({
+          data: { name: depName, slug: depSlug },
+        });
+      }
+
+      let school = await prisma.school.findFirst({
+        where: { name: "Facebook CGE", department_id: department.id },
+      });
       if (!school) {
         school = await prisma.school.create({
-          data: { name: "Facebook CGE", city: "Entre Ríos", department: "Entre Ríos" },
+          data: {
+            name: "Facebook CGE",
+            city: depName,
+            department: depName,
+            department_id: department.id,
+          },
         });
       }
       let subject = await prisma.subject.findFirst({ where: { name: "General" } });
@@ -357,12 +421,9 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
       for (const p of posts) {
         // Si dentro del post hay un link al CGE, lo usamos como URL principal
         // del concurso; si no, usamos el permalink del propio post.
-        const sourceUrl = p.cgeUrl ?? p.postUrl;
-
-        const existing = await prisma.contest.findFirst({
-          where: { source_url: sourceUrl, source_name: SOURCE_NAME },
-        });
-        if (existing) {
+        const sourceUrlRaw = p.cgeUrl ?? p.postUrl;
+        const sourceUrl = normalizeCgeUrl(sourceUrlRaw);
+        if (existingUrlSet.has(sourceUrl)) {
           facebookScraperLogger.info("Facebook scraper → concurso ya existente, se omite", {
             sourceUrl,
           });
