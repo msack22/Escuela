@@ -469,14 +469,21 @@ export const triggerManualScraping = async (source?: string) => {
   return response.data;
 };
 
-export const runManualScraping = async (sources?: string | string[]) => {
+export const runManualScraping = async (
+  sources?: string | string[],
+  options?: { send_notifications?: boolean },
+) => {
   const body = Array.isArray(sources)
     ? { sources }
     : sources
       ? { source: sources }
       : {};
+  const payload =
+    typeof options?.send_notifications === 'boolean'
+      ? { ...body, send_notifications: options.send_notifications }
+      : body;
 
-  const response = await api.post('/api/scraping/run', body, {
+  const response = await api.post('/api/scraping/run', payload, {
     timeout: 120000, // 2 minutes timeout for scraping operations
   });
   return response.data;

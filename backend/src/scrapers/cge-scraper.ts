@@ -5,6 +5,7 @@ import {
   fetchWithAxios,
   fetchWithPlaywright,
   fetchWithPuppeteer,
+  fetchWithBrowserDetailed,
   parseHtml,
   fetchHtmlOptimized,
   type BrowserEngine,
@@ -19,11 +20,6 @@ const DEPARTAMENTAL_PAGES: Array<{ slug: string; department: string }> = [
   { slug: "gualeguay", department: "gualeguay" },
   { slug: "gualeguaychu", department: "gualeguaychú" },
   { slug: "islas-del-ibicuy", department: "islas del ibicuy" },
-  { slug: "la-paz", department: "la paz" },
-  { slug: "nogoya", department: "nogoyá" },
-  { slug: "parana", department: "paraná" },
-  { slug: "san-salvador", department: "san salvador" },
-  { slug: "tala", department: "tala" },
   { slug: "uruguay", department: "uruguay" },
   { slug: "victoria", department: "victoria" },
   { slug: "villaguay", department: "villaguay" },
@@ -343,6 +339,10 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
 
   for (let i = 0; i < DEPARTAMENTAL_PAGES.length; i++) {
     const dep = DEPARTAMENTAL_PAGES[i];
+    if (i > 0) {
+      // Separador visual entre departamentos en cge.log.
+      cgeScraperLogger.blankLine();
+    }
 
     let contestsForDep: ContestItem[] = [];
 
@@ -365,22 +365,48 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
         useTor: true,
       });
       html = result.html;
-      cgeScraperLogger.info("CGE scraper → fetched HTML (optimized via Tor)", {
+      cgeScraperLogger.info("CGE scraper → fetched HTML (optimized)", {
         url: depBaseUrl,
         via: result.via,
         length: html.length,
+        tor_requested: result.tor.requested,
+        tor_used: result.tor.used,
+        tor_fallback_to_direct: result.tor.fallbackToDirect,
       });
     } else {
       if (engine === "puppeteer") {
-        html = await fetchWithPuppeteer(depBaseUrl, { timeout, waitUntil: "domcontentloaded", useTor: true });
+        const browserResult = await fetchWithBrowserDetailed(depBaseUrl, {
+          timeout,
+          waitUntil: "domcontentloaded",
+          engine: "puppeteer",
+          useTor: true,
+        });
+        html = browserResult.html;
+        cgeScraperLogger.info("CGE scraper → fetched HTML (browser)", {
+          url: depBaseUrl,
+          engine,
+          length: html.length,
+          tor_requested: true,
+          tor_used: browserResult.torUsed,
+          tor_fallback_to_direct: browserResult.fallbackToDirect,
+        });
       } else {
-        html = await fetchWithPlaywright(depBaseUrl, { timeout, waitUntil: "domcontentloaded", useTor: true });
+        const browserResult = await fetchWithBrowserDetailed(depBaseUrl, {
+          timeout,
+          waitUntil: "domcontentloaded",
+          engine: "playwright",
+          useTor: true,
+        });
+        html = browserResult.html;
+        cgeScraperLogger.info("CGE scraper → fetched HTML (browser)", {
+          url: depBaseUrl,
+          engine,
+          length: html.length,
+          tor_requested: true,
+          tor_used: browserResult.torUsed,
+          tor_fallback_to_direct: browserResult.fallbackToDirect,
+        });
       }
-      cgeScraperLogger.info("CGE scraper → fetched HTML (browser)", {
-        url: depBaseUrl,
-        engine,
-        length: html.length,
-      });
     }
 
     for (const section of LEVEL_SECTIONS) {
@@ -399,6 +425,16 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
         anchorId: section.id,
         count: contests.length,
       });
+
+      for (const contest of contests) {
+        cgeScraperLogger.info("CGE scraper → contest URL found", {
+          department: dep.department,
+          level: section.level,
+          source_url: contest.url,
+          title: contest.title,
+          published_at: contest.publishedAt?.toISOString() ?? null,
+        });
+      }
     }
 
     // No usamos fallback genérico: si una DDE no devuelve nada en las secciones,
@@ -641,6 +677,12 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
         },
       });
       created++;
+    } else {
+      cgeScraperLogger.info("CGE scraper → contest already exists, skipping", {
+        source_url: c.url,
+        department: c.department,
+        title: c.title,
+      });
     }
   }
 

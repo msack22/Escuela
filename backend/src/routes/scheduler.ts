@@ -3,6 +3,7 @@ import { schedulerService } from "../services/scheduler.service.js";
 import { runCgeScraper } from "../scrapers/cge-scraper.js";
 import { runFacebookCgeScraper } from "../scrapers/facebook-cge-scraper.js";
 import { appLogger } from "../lib/logger.js";
+import { sendAutomaticContestNotifications } from "../services/alert-auto.service.js";
 import { runScraperBySource } from "./scraping.js";
 
 export const schedulerRoutes: FastifyPluginAsync = async (app) => {
@@ -36,7 +37,7 @@ export const schedulerRoutes: FastifyPluginAsync = async (app) => {
     return { message: "Scheduler stopped successfully", status: "stopped" };
   });
 
-  app.post<{ Body?: { source?: string; sources?: string[]; force?: boolean } }>("/run-once", async (req, reply) => {
+  app.post<{ Body?: { source?: string; sources?: string[]; force?: boolean; send_notifications?: boolean } }>("/run-once", async (req, reply) => {
     const body = req.body ?? {};
     const sources: string[] =
       Array.isArray(body.sources) && body.sources.length > 0
@@ -44,9 +45,11 @@ export const schedulerRoutes: FastifyPluginAsync = async (app) => {
         : body.source
           ? [body.source]
           : ["all"];
+    const sendNotifications = body.send_notifications !== false;
 
     try {
       const prisma = req.server.prisma;
+      const startedAt = new Date();
       schedulerService.setCycleProgress({
         running: true,
         step: "Ejecutando scraping programado...",
@@ -64,6 +67,9 @@ export const schedulerRoutes: FastifyPluginAsync = async (app) => {
       }
 
       appLogger.info("Scheduler → run-once finished", { total, results });
+      const notifSummary = sendNotifications
+        ? await sendAutomaticContestNotifications(prisma, startedAt)
+        : { alerts_processed: 0, notifications_created: 0, skipped: true };
 
       schedulerService.setLastRun(new Date().toISOString());
       schedulerService.setCycleProgress({ running: false });
@@ -74,6 +80,8 @@ export const schedulerRoutes: FastifyPluginAsync = async (app) => {
         force: body.force,
         total_contests: total,
         results,
+        notifications: notifSummary,
+        send_notifications: sendNotifications,
       };
     } catch (e) {
       schedulerService.setCycleProgress({ running: false });
