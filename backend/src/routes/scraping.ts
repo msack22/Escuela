@@ -158,7 +158,7 @@ export const scrapingRoutes: FastifyPluginAsync = async (app) => {
       const anyError = results.some((r) => !r.success);
       const elapsedTotal = (Date.now() - start) / 1000;
       const notifSummary = sendNotifications
-        ? await sendAutomaticContestNotifications(req.server.prisma, new Date(start))
+        ? await sendAutomaticContestNotifications(req.server.prisma, start)
         : { alerts_processed: 0, notifications_created: 0, skipped: true };
 
       schedulerService.setLastRun(new Date().toISOString());
