@@ -18,8 +18,24 @@ function isTorProxyError(error: unknown): boolean {
   );
 }
 
-// Páginas iniciales de Entre Ríos (se pueden ir sumando más)
-const FACEBOOK_PAGES: string[] = ["https://www.facebook.com/ddeislasdelibicuy"];
+/**
+ * Página de Facebook + departamento al que se asocian los concursos creados.
+ * El feed puede enlazar convocatorias de varias zonas, pero el canal es de una DDE concreta:
+ * conviene usar el mismo departamento que en CGE (slug/name) para que los filtros en la app coincidan.
+ */
+export type FacebookCgePageConfig = {
+  pageUrl: string;
+  departmentSlug: string;
+  departmentName: string;
+};
+
+const FACEBOOK_PAGES: FacebookCgePageConfig[] = [
+  {
+    pageUrl: "https://www.facebook.com/ddeislasdelibicuy",
+    departmentSlug: "islas-del-ibicuy",
+    departmentName: "Islas Del Ibicuy",
+  },
+];
 
 // Directorio de perfil persistente para mantener sesión de Facebook entre ejecuciones.
 const FB_USER_DATA_DIR = path.join(process.cwd(), ".playwright-facebook-profile");
@@ -569,12 +585,16 @@ async function enrichPostFromDetails(
 
 export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<number> {
   const filterYm = `${new Date().getFullYear()}/${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+  const pagesLog = FACEBOOK_PAGES.map((p) => ({
+    pageUrl: p.pageUrl,
+    department: p.departmentSlug,
+  }));
   appLogger.info("Iniciando scraper Facebook CGE", {
-    pages: FACEBOOK_PAGES,
+    pages: pagesLog,
     cgeUrlOnlyYearMonth: filterYm,
   });
   facebookScraperLogger.info("Iniciando scraper Facebook CGE", {
-    pages: FACEBOOK_PAGES,
+    pages: pagesLog,
     cgeUrlOnlyYearMonth: filterYm,
   });
 
@@ -592,7 +612,8 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
       .replace(/\/$/, "");
 
   try {
-    for (const pageUrl of FACEBOOK_PAGES) {
+    for (const fbPage of FACEBOOK_PAGES) {
+      const pageUrl = fbPage.pageUrl;
       const page = await browser.newPage({
         userAgent:
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -607,6 +628,7 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
       const posts = await scrollAndCollectPosts(page, 22);
       facebookScraperLogger.info("Posts encontrados en Facebook", {
         pageUrl,
+        departmentSlug: fbPage.departmentSlug,
         count: posts.length,
         sampleUrls: posts.slice(0, 5).map((p) => p.postUrl),
       });
@@ -659,27 +681,34 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
       const defaultDate = new Date();
       defaultDate.setMonth(defaultDate.getMonth() + 1);
 
-      // Departamento genérico para concursos provenientes de Facebook.
-      const depName = "Entre Ríos";
-      const depSlug = "entre-rios";
+      // Mismo departamento que la DDE del feed (p. ej. Islas del Ibicuy), no provincia genérica.
       let department = await prisma.department.findFirst({
-        where: { OR: [{ slug: depSlug }, { name: depName }] },
+        where: {
+          OR: [{ slug: fbPage.departmentSlug }, { name: fbPage.departmentName }],
+        },
       });
       if (!department) {
         department = await prisma.department.create({
-          data: { name: depName, slug: depSlug },
+          data: { name: fbPage.departmentName, slug: fbPage.departmentSlug },
+        });
+        facebookScraperLogger.info("Facebook scraper → departamento creado para el feed", {
+          name: fbPage.departmentName,
+          slug: fbPage.departmentSlug,
         });
       }
 
+      // El nombre de la escuela no es relevante; lo importante es que `department_id`
+      // coincida con el scraper de CGE (Islas del Ibicuy).
+      const schoolName = "Facebook CGE";
       let school = await prisma.school.findFirst({
-        where: { name: "Facebook CGE", department_id: department.id },
+        where: { name: schoolName, department_id: department.id },
       });
       if (!school) {
         school = await prisma.school.create({
           data: {
-            name: "Facebook CGE",
-            city: depName,
-            department: depName,
+            name: schoolName,
+            city: fbPage.departmentName,
+            department: fbPage.departmentName,
             department_id: department.id,
           },
         });
