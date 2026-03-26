@@ -14,6 +14,7 @@ export interface ContestSearchFilters {
   departments?: string[];
   subjectIds?: number[];
   subjectId?: number;
+  subjectContains?: string;
   cities?: string[];
   city?: string;
   department?: string;
@@ -52,6 +53,12 @@ export const contestSearchService = {
     } else if (filters.subjectId != null) {
       where.subject_id = filters.subjectId;
     }
+    if (filters.subjectContains?.trim()) {
+      where.subject = {
+        ...(where.subject as Record<string, unknown> || {}),
+        name: { contains: filters.subjectContains.trim() },
+      };
+    }
     if (filters.titleContains?.trim()) {
       where.title = { contains: filters.titleContains };
     }
@@ -80,8 +87,15 @@ export const contestSearchService = {
         where,
         skip,
         take: limit,
-        // Ordenamos de más recientes a más antiguos por fecha principal del concurso.
-        orderBy: { date: "desc" },
+        // Ordenamos de más recientes a más antiguos priorizando fecha de publicación.
+        // Fallbacks: `date` (si no hay publication_date) y luego `created_at`.
+        orderBy: [
+          // Prisma soporta nulls: last en orderBy para Postgres/MySQL recientes.
+          // Si el motor no lo soportara, el fallback por `date`/`created_at` igual mantiene un orden estable.
+          { publication_date: { sort: "desc", nulls: "last" } },
+          { date: "desc" },
+          { created_at: "desc" },
+        ],
         include: { school: true, subject: true },
       }),
       prisma.contest.count({ where }),

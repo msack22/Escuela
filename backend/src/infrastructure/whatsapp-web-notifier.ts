@@ -9,17 +9,24 @@ let client: any = null;
 let initializing = false;
 let ready = false;
 
-function initClient(): Promise<void> {
+const DEFAULT_INIT_TIMEOUT_MS = 60_000;
+
+function initClient(timeoutMs: number = DEFAULT_INIT_TIMEOUT_MS): Promise<void> {
   appLogger.info("initClient WhatsApp Web llamado", { ready, initializing });
   if (ready) return Promise.resolve();
   if (initializing) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const interval = setInterval(() => {
         if (ready) {
           clearInterval(interval);
+          clearTimeout(timer);
           resolve();
         }
       }, 500);
+      const timer = setTimeout(() => {
+        clearInterval(interval);
+        reject(new Error(`WhatsApp Web no llegó a 'ready' en ${timeoutMs}ms (sigue inicializando)`));
+      }, timeoutMs);
     });
   }
   initializing = true;
@@ -44,11 +51,14 @@ function initClient(): Promise<void> {
   });
 
   client.on("auth_failure", (msg: any) => {
+    ready = false;
+    initializing = false;
     appLogger.error("Fallo de autenticación en WhatsApp Web", { msg });
   });
 
   client.on("disconnected", (reason: any) => {
     ready = false;
+    initializing = false;
     appLogger.warn("WhatsApp Web desconectado, se intentará reconectar al próximo envío", { reason });
   });
 
@@ -57,13 +67,24 @@ function initClient(): Promise<void> {
     appLogger.error("Error inicializando WhatsApp Web", { error: String(err) });
   });
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const interval = setInterval(() => {
       if (ready) {
         clearInterval(interval);
+        clearTimeout(timer);
         resolve();
       }
     }, 500);
+    const timer = setTimeout(() => {
+      clearInterval(interval);
+      // No marcamos ready=false porque ya lo está; dejamos initializing=false para permitir reintento.
+      initializing = false;
+      reject(
+        new Error(
+          `WhatsApp Web no llegó a 'ready' en ${timeoutMs}ms. Si es la primera vez, necesitás escanear el QR del proceso; si ya estaba logueado, puede haberse vencido la sesión.`,
+        ),
+      );
+    }, timeoutMs);
   });
 }
 

@@ -35,8 +35,10 @@ export async function handleTestContestNotifications(
   if (!alert) return { error: "Alert not found", statusCode: 404 };
   const user = alert.user_id ? await db.user.findUnique({ where: { id: alert.user_id } }) : null;
   const email = ((alert.email_address || user?.email) ?? "").trim();
-  if (!email) return { error: "La alerta no tiene email ni usuario asociado con email", statusCode: 400 };
   const whatsapp = ((alert.whatsapp_number || user?.phone_number) ?? "").trim();
+  if (!email && !whatsapp) {
+    return { error: "La alerta no tiene email ni WhatsApp (ni usuario asociado)", statusCode: 400 };
+  }
 
   appLogger.info("TestContestNotifications datos", {
     alertId,
@@ -85,24 +87,41 @@ export async function handleTestContestNotifications(
     .join("; ");
 
   // Aviso previo por WhatsApp (si hay número configurado)
+  let whatsappSent = false;
   if (whatsapp) {
-    const preview = `Te vamos a enviar un correo de prueba a ${email} con ${contests.length} concurso(s).\nAsunto: ${subject}.\nFiltros: ${filtersSummary || "sin filtros"}. (número alerta: ${whatsapp})`;
-    await sendWhatsappMessage(whatsapp, preview);
+    const destination = email ? `un correo de prueba a ${email}` : "un mensaje de prueba por este canal";
+    const preview = `Te vamos a enviar ${destination} con ${contests.length} concurso(s).\nAsunto: ${subject}.\nFiltros: ${filtersSummary || "sin filtros"}. (número alerta: ${whatsapp})`;
+    whatsappSent = await sendWhatsappMessage(whatsapp, preview);
   }
 
-  let sent = false;
-  if (isEmailConfigured()) {
-    sent = await emailNotifier.send({ to: email, subject, html });
+  let emailSent = false;
+  if (email) {
+    if (isEmailConfigured()) {
+      emailSent = await emailNotifier.send({ to: email, subject, html });
+    } else {
+      emailSent = false;
+    }
   }
 
-  const message = sent
-    ? `Email de prueba enviado a ${email} con ${contests.length} concurso(s).`
-    : !isEmailConfigured()
+  const sentAny = emailSent || whatsappSent;
+
+  if (sentAny) {
+    // Importante: en pruebas, también marcamos como notificado para evitar re-notificar
+    // los mismos concursos en ejecuciones automáticas posteriores.
+    await db.contestNotificationSent.createMany({
+      data: contests.map((c) => ({ alert_id: alertId, contest_id: c.id })),
+      skipDuplicates: true,
+    });
+  }
+
+  const message = sentAny
+    ? `Prueba enviada${emailSent ? ` por email a ${email}` : ""}${whatsappSent ? `${emailSent ? " y" : ""} por WhatsApp a ${whatsapp}` : ""} con ${contests.length} concurso(s).`
+    : email && !isEmailConfigured()
       ? "Email no configurado. Revisar backend/.env (SENDER_EMAIL, BREVO_API_KEY o SENDGRID_API_KEY) y backend/logs/email.log."
-      : "No se pudo enviar el email. Revisar backend/.env y backend/logs/email.log para ver el error (Brevo/SendGrid).";
+      : "No se pudo enviar la prueba. Revisar backend/logs/app.log y backend/logs/email.log para ver el error (Brevo/SendGrid/WhatsApp).";
 
   return {
-    success: sent,
+    success: sentAny,
     message,
     contests_sent: contests.length,
     email_subject: subject,

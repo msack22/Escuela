@@ -22,7 +22,6 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchContests,
-  fetchSubjects,
   fetchCities,
   fetchDepartments,
   fetchSources,
@@ -73,7 +72,7 @@ const ContestList: React.FC = () => {
   const queryClient = useQueryClient();
   const [filters, setFilters] = useState({
     title_contains: '',
-    subject_ids: [] as number[],
+    subject_contains: '',
     cities: [] as string[],
     departments: [] as string[],
     source_name: undefined as string | undefined,
@@ -85,10 +84,6 @@ const ContestList: React.FC = () => {
     queryFn: () => fetchContests(filters),
   });
 
-  const { data: subjects } = useQuery({
-    queryKey: ['subjects'],
-    queryFn: fetchSubjects,
-  });
   const { data: citiesData } = useQuery({
     queryKey: ['cities'],
     queryFn: fetchCities,
@@ -251,7 +246,7 @@ const ContestList: React.FC = () => {
   const handleClear = () => {
     setFilters({
       title_contains: '',
-      subject_ids: [],
+      subject_contains: '',
       cities: [],
       departments: [],
       source_name: undefined,
@@ -282,20 +277,11 @@ const ContestList: React.FC = () => {
 
           <Col xs={24} md={6}>
             <Form.Item label="Materias">
-              <Select
-                mode="multiple"
-                value={filters.subject_ids}
-                onChange={(vals) =>
-                  setFilters({ ...filters, subject_ids: vals })
-                }
-                placeholder="Seleccionar materias"
-              >
-                {subjects?.map((s: any) => (
-                  <Option key={s.id} value={s.id}>
-                    {s.name}
-                  </Option>
-                ))}
-              </Select>
+              <Input
+                value={filters.subject_contains}
+                onChange={(e) => setFilters({ ...filters, subject_contains: e.target.value })}
+                placeholder="Ej: física, preceptor, domiciliaria"
+              />
             </Form.Item>
           </Col>
 
@@ -443,7 +429,7 @@ const ContestList: React.FC = () => {
                 <div>
                   {infoModalContest.publication_date && `Publicación: ${new Date(infoModalContest.publication_date).toLocaleDateString('es-AR')}`}
                   {infoModalContest.publication_date && infoModalContest.date && ' — '}
-                  {infoModalContest.date && `Concurso: ${new Date(infoModalContest.date).toLocaleDateString('es-AR')}`}
+                  {infoModalContest.date && `Concurso: ${new Date(infoModalContest.date).toLocaleString('es-AR')}`}
                   {infoModalContest.registration_deadline && ` — Cierre inscripción: ${new Date(infoModalContest.registration_deadline).toLocaleDateString('es-AR')}`}
                 </div>
               </div>

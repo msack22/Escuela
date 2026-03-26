@@ -76,6 +76,7 @@ const ScrapingControl: React.FC = () => {
   });
 
   const [selectedSources, setSelectedSources] = React.useState<string[]>([]);
+  const [sendNotifications, setSendNotifications] = React.useState<boolean>(true);
   const [configHours, setConfigHours] = React.useState<number[]>([8, 12, 16, 20]);
   const [configSources, setConfigSources] = React.useState<string[]>(['cge_simple', 'facebook_cge']);
 
@@ -87,7 +88,10 @@ const ScrapingControl: React.FC = () => {
   }, [schedulerConfig]);
 
   const runMutation = useMutation({
-    mutationFn: (sources?: string[]) => runManualScraping(sources && sources.length ? sources : undefined),
+    mutationFn: (params: { sources?: string[]; send_notifications?: boolean }) =>
+      runManualScraping(params.sources && params.sources.length ? params.sources : undefined, {
+        send_notifications: params.send_notifications,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['scrapingStatus'] });
       queryClient.invalidateQueries({ queryKey: ['scrapingLogs'] });
@@ -322,6 +326,19 @@ const ScrapingControl: React.FC = () => {
                 options={availableSources.map((s) => ({ label: s, value: s }))}
               />
             </Space>
+            <Space align="center" wrap>
+              <Text type="secondary">Enviar notificaciones al finalizar:</Text>
+              <Select
+                style={{ width: 180 }}
+                value={sendNotifications ? 'yes' : 'no'}
+                onChange={(value) => setSendNotifications(value === 'yes')}
+                disabled={isRunning}
+                options={[
+                  { value: 'yes', label: 'Sí, enviar' },
+                  { value: 'no', label: 'No enviar' },
+                ]}
+              />
+            </Space>
 
             <Space wrap>
               <Button
@@ -330,7 +347,10 @@ const ScrapingControl: React.FC = () => {
                 loading={runMutation.isPending}
                 disabled={isRunning}
                 onClick={() =>
-                  runMutation.mutate(selectedSources.length ? selectedSources : undefined)
+                  runMutation.mutate({
+                    sources: selectedSources.length ? selectedSources : undefined,
+                    send_notifications: sendNotifications,
+                  })
                 }
               >
                 Ejecutar scraping ahora

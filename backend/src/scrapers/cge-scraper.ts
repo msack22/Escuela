@@ -1,33 +1,26 @@
 import type { PrismaClient } from "@prisma/client";
 import { config } from "../config.js";
 import { appLogger, cgeScraperLogger } from "../lib/logger.js";
+import { extractContestFieldsFromText } from "../services/contest-text-parser.js";
 import {
   fetchWithAxios,
   fetchWithPlaywright,
   fetchWithPuppeteer,
+  fetchWithBrowserDetailed,
   parseHtml,
   fetchHtmlOptimized,
   type BrowserEngine,
 } from "./scraper-kit.js";
+import { changeTorIp, getCurrentTorIp } from "../lib/tor-manager.js";
 
 const BASE_URL = "https://cge.entrerios.gov.ar";
 const SOURCE_NAME = "CGE Entre Ríos Simple";
 
 const DEPARTAMENTAL_PAGES: Array<{ slug: string; department: string }> = [
-  { slug: "colon", department: "colón" },
-  { slug: "concordia", department: "concordia" },
-  { slug: "diamante", department: "diamante" },
-  { slug: "federacion", department: "federación" },
-  { slug: "federal", department: "federal" },
-  { slug: "feliciano", department: "feliciano" },
+  
   { slug: "gualeguay", department: "gualeguay" },
   { slug: "gualeguaychu", department: "gualeguaychú" },
   { slug: "islas-del-ibicuy", department: "islas del ibicuy" },
-  { slug: "la-paz", department: "la paz" },
-  { slug: "nogoya", department: "nogoyá" },
-  { slug: "parana", department: "paraná" },
-  { slug: "san-salvador", department: "san salvador" },
-  { slug: "tala", department: "tala" },
   { slug: "uruguay", department: "uruguay" },
   { slug: "victoria", department: "victoria" },
   { slug: "villaguay", department: "villaguay" },
@@ -215,68 +208,13 @@ function previousMonthYearMonth(year: number, month2: string): { year: number; m
 }
 
 /**
- * Parser heurístico (sin IA) para extraer campos estructurados básicos
- * desde la descripción de un concurso:
- * - level (nivel)
- * - shift (turno)
- * - schedule (texto de horarios)
- * - hours_to_cover (suma de horas declaradas)
- *
- * Esto se puede reemplazar o complementar luego con un proceso de IA.
- */
-function extractStructuredFieldsFromDescription(description?: string): {
-  level?: string;
-  shift?: string;
-  schedule?: string;
-  hours_to_cover?: number;
-} {
-  if (!description) return {};
-
-  const text = description.toLowerCase();
-
-  let level: string | undefined;
-  if (/secundaria|secundario/.test(text)) level = "secundario";
-  else if (/primaria|primario/.test(text)) level = "primario";
-  else if (/inicial/.test(text)) level = "inicial";
-  else if (/superior|instituto/.test(text)) level = "superior";
-
-  let shift: string | undefined;
-  if (/\btm\b|\bturno mañana\b/.test(text)) shift = "mañana";
-  else if (/\btt\b|\bturno tarde\b/.test(text)) shift = "tarde";
-  else if (/\btn\b|\bnocturno\b|\bnoche\b/.test(text)) shift = "noche";
-
-  const lines = description.split(/\r?\n/).map((l) => l.trim());
-  const scheduleLines = lines.filter((l) =>
-    /(hs\b|hora|horas|\blunes\b|\bmartes\b|\bmiércoles\b|\bjueves\b|\bviernes\b|\bsábado\b|\bdomingo\b)/i.test(l)
-  );
-
-  const schedule = scheduleLines.join("\n");
-
-  let hours_to_cover: number | undefined;
-  const hourMatches = description.match(/(\d+)\s*hs\b/gi);
-  if (hourMatches) {
-    let total = 0;
-    for (const match of hourMatches) {
-      const numMatch = match.match(/(\d+)\s*hs\b/i);
-      if (numMatch) {
-        const n = Number(numMatch[1]);
-        if (!Number.isNaN(n)) total += n;
-      }
-    }
-    if (total > 0) hours_to_cover = total;
-  }
-
-  return { level, shift, schedule: schedule || undefined, hours_to_cover };
-}
-
-/**
  * Enriquecimiento de un concurso con información de la nota individual:
  * - descripción (texto principal)
  * - (en el futuro se puede mapear horarios, materias, etc. desde esta descripción).
  */
 async function enrichContestWithDetails(contest: ContestItem, timeout: number): Promise<ContestItem> {
   try {
-    const { html } = await fetchHtmlOptimized(contest.url, { timeout, minLength: 500 });
+    const { html } = await fetchHtmlOptimized(contest.url, { timeout, minLength: 500, useTor: true });
 
     // Algunos sitios del CGE usan mecanismos de protección (Wordfence / rate limiting)
     // que devuelven una página de bloqueo con este mensaje en lugar de la nota real.
@@ -347,6 +285,10 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
 
   for (let i = 0; i < DEPARTAMENTAL_PAGES.length; i++) {
     const dep = DEPARTAMENTAL_PAGES[i];
+    if (i > 0) {
+      // Separador visual entre departamentos en cge.log.
+      cgeScraperLogger.blankLine();
+    }
 
     let contestsForDep: ContestItem[] = [];
 
@@ -366,24 +308,51 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
         timeout,
         engine,
         minLength: 500,
+        useTor: true,
       });
       html = result.html;
       cgeScraperLogger.info("CGE scraper → fetched HTML (optimized)", {
         url: depBaseUrl,
         via: result.via,
         length: html.length,
+        tor_requested: result.tor.requested,
+        tor_used: result.tor.used,
+        tor_fallback_to_direct: result.tor.fallbackToDirect,
       });
     } else {
       if (engine === "puppeteer") {
-        html = await fetchWithPuppeteer(depBaseUrl, { timeout, waitUntil: "domcontentloaded" });
+        const browserResult = await fetchWithBrowserDetailed(depBaseUrl, {
+          timeout,
+          waitUntil: "domcontentloaded",
+          engine: "puppeteer",
+          useTor: true,
+        });
+        html = browserResult.html;
+        cgeScraperLogger.info("CGE scraper → fetched HTML (browser)", {
+          url: depBaseUrl,
+          engine,
+          length: html.length,
+          tor_requested: true,
+          tor_used: browserResult.torUsed,
+          tor_fallback_to_direct: browserResult.fallbackToDirect,
+        });
       } else {
-        html = await fetchWithPlaywright(depBaseUrl, { timeout, waitUntil: "domcontentloaded" });
+        const browserResult = await fetchWithBrowserDetailed(depBaseUrl, {
+          timeout,
+          waitUntil: "domcontentloaded",
+          engine: "playwright",
+          useTor: true,
+        });
+        html = browserResult.html;
+        cgeScraperLogger.info("CGE scraper → fetched HTML (browser)", {
+          url: depBaseUrl,
+          engine,
+          length: html.length,
+          tor_requested: true,
+          tor_used: browserResult.torUsed,
+          tor_fallback_to_direct: browserResult.fallbackToDirect,
+        });
       }
-      cgeScraperLogger.info("CGE scraper → fetched HTML (browser)", {
-        url: depBaseUrl,
-        engine,
-        length: html.length,
-      });
     }
 
     for (const section of LEVEL_SECTIONS) {
@@ -402,6 +371,16 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
         anchorId: section.id,
         count: contests.length,
       });
+
+      for (const contest of contests) {
+        cgeScraperLogger.info("CGE scraper → contest URL found", {
+          department: dep.department,
+          level: section.level,
+          source_url: contest.url,
+          title: contest.title,
+          published_at: contest.publishedAt?.toISOString() ?? null,
+        });
+      }
     }
 
     // No usamos fallback genérico: si una DDE no devuelve nada en las secciones,
@@ -548,6 +527,17 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
     const enriched = await enrichContestWithDetails(c, timeout);
     enrichedContests.push(enriched);
 
+    // Cambiamos de IP cada 5 concursos para evitar bloqueos.
+    if ((idx + 1) % 5 === 0) {
+      try {
+        await changeTorIp();
+        const newIp = await getCurrentTorIp();
+        cgeScraperLogger.info("CGE scraper → changed Tor IP", { newIp });
+      } catch (err) {
+        cgeScraperLogger.warn("CGE scraper → failed to change Tor IP", { error: (err as Error)?.message });
+      }
+    }
+
     // Pausa entre link y link para no saturar ni ser bloqueados por la web.
     // Antes: ~1,5–3 s. Ahora: ~3–5 s.
     const delayMs = 3000 + Math.floor(Math.random() * 2000);
@@ -599,20 +589,27 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
       });
     }
 
-    let subject = await prisma.subject.findFirst({ where: { name: "General" } });
-    if (!subject) {
-      subject = await prisma.subject.create({ data: { name: "General" } });
-    }
-
     const existing = await prisma.contest.findFirst({
       where: { source_url: c.url, source_name: SOURCE_NAME },
     });
     if (!existing) {
-      const structured = extractStructuredFieldsFromDescription(c.description);
-      const publicationDate = c.publishedAt ?? fallbackDate;
+      const structured = extractContestFieldsFromText({
+        title: c.title,
+        description: c.description,
+        fallbackPublicationDate: c.publishedAt ?? fallbackDate,
+        fallbackContestDate: c.contestDate,
+        fallbackLevel: c.level,
+      });
+      const publicationDate = structured.publicationDate ?? c.publishedAt ?? fallbackDate;
       // Si desde la nota individual pudimos extraer una fecha concreta de concurso,
       // la usamos como `date` principal; si no, usamos la fecha de publicación.
-      const contestDate = c.contestDate ?? publicationDate;
+      const contestDate = structured.contestDate ?? c.contestDate ?? publicationDate;
+      const subjectName = (structured.subjectName ?? "General").slice(0, 255);
+
+      let subject = await prisma.subject.findFirst({ where: { name: subjectName } });
+      if (!subject) {
+        subject = await prisma.subject.create({ data: { name: subjectName } });
+      }
 
       await prisma.contest.create({
         data: {
@@ -623,7 +620,7 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
           level: structured.level ?? c.level,
           shift: structured.shift,
           schedule: structured.schedule,
-          hours_to_cover: structured.hours_to_cover,
+          hours_to_cover: structured.hoursToCover,
           school_id: school.id,
           subject_id: subject.id,
           source_url: c.url,
@@ -633,6 +630,12 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
         },
       });
       created++;
+    } else {
+      cgeScraperLogger.info("CGE scraper → contest already exists, skipping", {
+        source_url: c.url,
+        department: c.department,
+        title: c.title,
+      });
     }
   }
 
