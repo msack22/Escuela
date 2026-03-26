@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import path from "path";
 import { appLogger, facebookScraperLogger } from "../lib/logger.js";
+import { extractContestFieldsFromText } from "../services/contest-text-parser.js";
 
 const SOURCE_NAME = "Facebook CGE Entre Ríos";
 const TOR_PROXY_URL = process.env.TOR_PROXY_URL || "socks5://127.0.0.1:9050";
@@ -742,11 +743,6 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
           },
         });
       }
-      let subject = await prisma.subject.findFirst({ where: { name: "General" } });
-      if (!subject) {
-        subject = await prisma.subject.create({ data: { name: "General" } });
-      }
-
       for (const p of posts) {
         // Si dentro del post hay un link al CGE, lo usamos como URL principal
         // del concurso; si no, usamos el permalink del propio post.
@@ -772,11 +768,28 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
           titlePreview: p.text.slice(0, 120),
         });
 
+        const parsed = extractContestFieldsFromText({
+          title: p.text.slice(0, 200),
+          description: p.text,
+          fallbackContestDate: defaultDate,
+          fallbackPublicationDate: defaultDate,
+        });
+        const subjectName = (parsed.subjectName ?? "General").slice(0, 255);
+        let subject = await prisma.subject.findFirst({ where: { name: subjectName } });
+        if (!subject) {
+          subject = await prisma.subject.create({ data: { name: subjectName } });
+        }
+
         await prisma.contest.create({
           data: {
             title: p.text.slice(0, 200),
             description: p.text,
-            date: defaultDate,
+            date: parsed.contestDate ?? defaultDate,
+            publication_date: parsed.publicationDate ?? defaultDate,
+            level: parsed.level ?? null,
+            shift: parsed.shift ?? null,
+            schedule: parsed.schedule ?? null,
+            hours_to_cover: parsed.hoursToCover ?? null,
             school_id: school.id,
             subject_id: subject.id,
             source_url: sourceUrl,

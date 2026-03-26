@@ -93,7 +93,7 @@ function extractHoursToCover(text: string): number | undefined {
     if (!Number.isNaN(n) && n > 0) candidates.push(n);
   }
   // Aceptamos "04 hs Materia..." pero evitamos horas de reloj (a las 10:30 hs).
-  for (const m of text.matchAll(/(?:^|\n|[.;,:]\s+)\s*(\d{1,2})\s*hs?\b(?!\s*(?:de?\s*)?\d{1,2}[:.]\d{2})/gim)) {
+  for (const m of text.matchAll(/(?:^|\n|[.;,:]\s+)\s*[•*\-]?\s*(\d{1,2})\s*hs?\b\.?(?!\s*(?:de?\s*)?\d{1,2}[:.]\d{2})/gim)) {
     const n = Number(m[1]);
     if (!Number.isNaN(n) && n > 0) candidates.push(n);
   }
@@ -109,25 +109,42 @@ function extractSubjectName(text: string): string | undefined {
     .map((l) => l.trim())
     .filter(Boolean);
 
+  const cleanSubject = (raw: string): string => {
+    let s = raw.trim().replace(/\s+/g, " ");
+    // Cortes típicos que no forman parte del nombre de materia/cargo.
+    s = s.split(/\b(?:stf|supl|titular|interino|turno|t[.\s]*ma[nñ]ana|t[.\s]*tarde|tm|tt|tn)\b/i)[0];
+    // Remover nivel/año/división al final: "4° año B", "2do", etc.
+    s = s.replace(/\b\d{1,2}\s*(?:°|º|ro|do|to)?\s*(?:a[nñ]o)?(?:\s+[a-z])?\b.*$/i, "");
+    // Remover fragmentos muy comunes de modalidad/orientación.
+    s = s.replace(/\b(?:co|t|orientad[ao]|modalidad|com[uú]n)\b.*$/i, "");
+    // Quitar puntuación sobrante final.
+    s = s.replace(/[–\-:;,.\s]+$/g, "").trim();
+    return s;
+  };
+
   for (const line of lines) {
     // Ej: "04 hs Maestra Domiciliaria Hospitalaria. Modalidad común..."
-    const m = line.match(/(?:^|[.;,:]\s+)(\d{1,2})\s*hs?\b[:\s-]*(.+)$/i);
+    const m = line.match(/(?:^|[.;,:]\s+)\s*[•*\-]?\s*(\d{1,2})\s*hs?\b\.?[:\s-]*(.+)$/i);
     if (!m) continue;
-    const tail = m[2]
+    const tail = cleanSubject(
+      m[2]
       .split(/[.;]|Modalidad|STF|Turno|horario/i)[0]
       .trim()
-      .replace(/\s+/g, " ");
+      .replace(/\s+/g, " "),
+    );
     if (tail.length >= 3 && tail.length <= 120) return tail;
   }
 
   for (const line of lines) {
     // Ej: "2 HC FISICA Y QUIMICA – 2° 2° – STF – T. TARDE"
-    const m = line.match(/(?:^|[.;,:]\s+)(\d{1,2})\s*HC\b[:\s-]*(.+)$/i);
+    const m = line.match(/(?:^|[.;,:]\s+)\s*[•*\-]?\s*(\d{1,2})\s*HC\b\.?[:\s-]*(.+)$/i);
     if (!m) continue;
-    const tail = m[2]
+    const tail = cleanSubject(
+      m[2]
       .split(/[–-]|STF|SUPL|titular|turno|t\.\s*ma[nñ]ana|t\.\s*tarde/i)[0]
       .trim()
-      .replace(/\s+/g, " ");
+      .replace(/\s+/g, " "),
+    );
     if (tail.length >= 3 && tail.length <= 120) return tail;
   }
 
@@ -135,7 +152,7 @@ function extractSubjectName(text: string): string | undefined {
     // Ej: "Cargo Preceptor TT STF ..."
     const m = line.match(/\bcargo\s+([a-záéíóúñ][a-záéíóúñ\s]+?)(?:\s+\b(?:tm|tt|tn|stf|supl|titular|interino)\b|[.;,-]|$)/i);
     if (!m) continue;
-    const tail = m[1].trim().replace(/\s+/g, " ");
+    const tail = cleanSubject(m[1].trim().replace(/\s+/g, " "));
     if (tail.length >= 3 && tail.length <= 120) return tail;
   }
 
