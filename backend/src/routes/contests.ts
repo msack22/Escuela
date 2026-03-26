@@ -44,6 +44,7 @@ export const contestsRoutes: FastifyPluginAsync = async (app) => {
       departments?: string | string[];
       subject_id?: string;
       subject_ids?: string | string[];
+      subject_contains?: string;
       city?: string;
       cities?: string | string[];
       department?: string;
@@ -76,6 +77,7 @@ export const contestsRoutes: FastifyPluginAsync = async (app) => {
       departments: departmentsList.length ? departmentsList : undefined,
       subjectId: q.subject_id != null ? parseInt(q.subject_id, 10) : undefined,
       subjectIds: subjectIdsList.length ? subjectIdsList : undefined,
+      subjectContains: q.subject_contains || undefined,
       city: q.city || undefined,
       cities: citiesList.length ? citiesList : undefined,
       department: q.department || undefined,

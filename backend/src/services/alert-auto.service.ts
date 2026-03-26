@@ -199,8 +199,11 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
       }
     }
 
-    const sent = emailSent || whatsappSent;
-    if (sent) {
+    // Guardamos como "notificado" si se pudo notificar por AL MENOS un canal.
+    // Esto evita re-enviar el mismo lote por email si WhatsApp falla (o viceversa).
+    const sentAny = emailSent || whatsappSent;
+
+    if (sentAny) {
       await db.contestNotificationSent.createMany({
         data: toNotify.map((c) => ({
           alert_id: alert.id,
@@ -218,15 +221,31 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
         whatsappSent,
         contests: toNotify.map((c) => c.id),
       });
+
+      if ((!!email && !emailSent) || (!!whatsapp && !whatsappSent)) {
+        appLogger.warn(
+          "AlertAuto → se notificó por al menos un canal, pero otro falló (no se reintentará para estos concursos)",
+          {
+            alertId: alert.id,
+            email: email || null,
+            whatsapp: whatsapp || null,
+            emailSent,
+            whatsappSent,
+            toNotifyCount: toNotify.length,
+          },
+        );
+      }
     } else {
       appLogger.warn(
-        "AlertAuto → había concursos para notificar pero no se envió mail ni WhatsApp (revisá email.log / WhatsApp listo)",
+        "AlertAuto → había concursos para notificar pero no se envió ni mail ni WhatsApp (no se marca como notificado)",
         {
           alertId: alert.id,
           toNotifyCount: toNotify.length,
           hadEmail: !!email,
           hadWhatsapp: !!whatsapp,
           emailConfigured: isEmailConfigured(),
+          emailSent,
+          whatsappSent,
         },
       );
     }

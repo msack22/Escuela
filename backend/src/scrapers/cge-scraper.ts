@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { config } from "../config.js";
 import { appLogger, cgeScraperLogger } from "../lib/logger.js";
+import { extractContestFieldsFromText } from "../services/contest-text-parser.js";
 import {
   fetchWithAxios,
   fetchWithPlaywright,
@@ -204,61 +205,6 @@ function previousMonthYearMonth(year: number, month2: string): { year: number; m
   const month = Number.parseInt(month2, 10) || 1;
   if (month > 1) return { year, month2: String(month - 1).padStart(2, "0") };
   return { year: year - 1, month2: "12" };
-}
-
-/**
- * Parser heurístico (sin IA) para extraer campos estructurados básicos
- * desde la descripción de un concurso:
- * - level (nivel)
- * - shift (turno)
- * - schedule (texto de horarios)
- * - hours_to_cover (suma de horas declaradas)
- *
- * Esto se puede reemplazar o complementar luego con un proceso de IA.
- */
-function extractStructuredFieldsFromDescription(description?: string): {
-  level?: string;
-  shift?: string;
-  schedule?: string;
-  hours_to_cover?: number;
-} {
-  if (!description) return {};
-
-  const text = description.toLowerCase();
-
-  let level: string | undefined;
-  if (/secundaria|secundario/.test(text)) level = "secundario";
-  else if (/primaria|primario/.test(text)) level = "primario";
-  else if (/inicial/.test(text)) level = "inicial";
-  else if (/superior|instituto/.test(text)) level = "superior";
-
-  let shift: string | undefined;
-  if (/\btm\b|\bturno mañana\b/.test(text)) shift = "mañana";
-  else if (/\btt\b|\bturno tarde\b/.test(text)) shift = "tarde";
-  else if (/\btn\b|\bnocturno\b|\bnoche\b/.test(text)) shift = "noche";
-
-  const lines = description.split(/\r?\n/).map((l) => l.trim());
-  const scheduleLines = lines.filter((l) =>
-    /(hs\b|hora|horas|\blunes\b|\bmartes\b|\bmiércoles\b|\bjueves\b|\bviernes\b|\bsábado\b|\bdomingo\b)/i.test(l)
-  );
-
-  const schedule = scheduleLines.join("\n");
-
-  let hours_to_cover: number | undefined;
-  const hourMatches = description.match(/(\d+)\s*hs\b/gi);
-  if (hourMatches) {
-    let total = 0;
-    for (const match of hourMatches) {
-      const numMatch = match.match(/(\d+)\s*hs\b/i);
-      if (numMatch) {
-        const n = Number(numMatch[1]);
-        if (!Number.isNaN(n)) total += n;
-      }
-    }
-    if (total > 0) hours_to_cover = total;
-  }
-
-  return { level, shift, schedule: schedule || undefined, hours_to_cover };
 }
 
 /**
@@ -643,20 +589,27 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
       });
     }
 
-    let subject = await prisma.subject.findFirst({ where: { name: "General" } });
-    if (!subject) {
-      subject = await prisma.subject.create({ data: { name: "General" } });
-    }
-
     const existing = await prisma.contest.findFirst({
       where: { source_url: c.url, source_name: SOURCE_NAME },
     });
     if (!existing) {
-      const structured = extractStructuredFieldsFromDescription(c.description);
-      const publicationDate = c.publishedAt ?? fallbackDate;
+      const structured = extractContestFieldsFromText({
+        title: c.title,
+        description: c.description,
+        fallbackPublicationDate: c.publishedAt ?? fallbackDate,
+        fallbackContestDate: c.contestDate,
+        fallbackLevel: c.level,
+      });
+      const publicationDate = structured.publicationDate ?? c.publishedAt ?? fallbackDate;
       // Si desde la nota individual pudimos extraer una fecha concreta de concurso,
       // la usamos como `date` principal; si no, usamos la fecha de publicación.
-      const contestDate = c.contestDate ?? publicationDate;
+      const contestDate = structured.contestDate ?? c.contestDate ?? publicationDate;
+      const subjectName = (structured.subjectName ?? "General").slice(0, 255);
+
+      let subject = await prisma.subject.findFirst({ where: { name: subjectName } });
+      if (!subject) {
+        subject = await prisma.subject.create({ data: { name: subjectName } });
+      }
 
       await prisma.contest.create({
         data: {
@@ -667,7 +620,7 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
           level: structured.level ?? c.level,
           shift: structured.shift,
           schedule: structured.schedule,
-          hours_to_cover: structured.hours_to_cover,
+          hours_to_cover: structured.hoursToCover,
           school_id: school.id,
           subject_id: subject.id,
           source_url: c.url,
