@@ -30,6 +30,16 @@ export async function handleTestContestNotifications(
   alertId: number,
   body: TestContestNotificationsBody
 ) {
+  const formatDateTime = (d: string | null | undefined) =>
+    d
+      ? new Date(d).toLocaleString("es-AR", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "—";
   const { date_from, date_to, departments, subject_ids, limit = 10 } = body;
   const alert = await db.alert.findUnique({ where: { id: alertId } });
   if (!alert) return { error: "Alert not found", statusCode: 404 };
@@ -73,7 +83,12 @@ export async function handleTestContestNotifications(
   const html = contests
     .map(
       (c) =>
-        `<p><strong>${escapeHtml(c.title)}</strong><br/>${(c.school?.city ?? "")} – ${(c.school?.department ?? "")} | ${(c.subject?.name ?? "")}<br/><a href="${escapeHtml(c.source?.url ?? "")}">Ver</a></p>`
+        `<p><strong>${escapeHtml(c.title)}</strong><br/>` +
+        `Fecha concurso: ${escapeHtml(formatDateTime(c.date))}<br/>` +
+        `Horas: ${c.hours_to_cover ?? "—"}<br/>` +
+        `Materia/Cargo: ${escapeHtml(c.subject?.name ?? "—")}<br/>` +
+        `${escapeHtml(c.school?.city ?? "")} – ${escapeHtml(c.school?.department ?? "")}<br/>` +
+        `<a href="${escapeHtml(c.source?.url ?? "")}">Ver</a></p>`
     )
     .join("");
 
@@ -90,7 +105,19 @@ export async function handleTestContestNotifications(
   let whatsappSent = false;
   if (whatsapp) {
     const destination = email ? `un correo de prueba a ${email}` : "un mensaje de prueba por este canal";
-    const preview = `Te vamos a enviar ${destination} con ${contests.length} concurso(s).\nAsunto: ${subject}.\nFiltros: ${filtersSummary || "sin filtros"}. (número alerta: ${whatsapp})`;
+    const lines = contests.map(
+      (c) =>
+        `• ${c.title}\n` +
+        `  Fecha concurso: ${formatDateTime(c.date)}\n` +
+        `  Horas: ${c.hours_to_cover ?? "—"}\n` +
+        `  Materia/Cargo: ${c.subject?.name ?? "—"}\n` +
+        `  ${c.source?.url ?? "—"}`
+    );
+    const preview =
+      `Te vamos a enviar ${destination} con ${contests.length} concurso(s).\n` +
+      `Asunto: ${subject}.\n` +
+      `Filtros: ${filtersSummary || "sin filtros"}. (número alerta: ${whatsapp})\n\n` +
+      `${lines.join("\n\n")}`;
     whatsappSent = await sendWhatsappMessage(whatsapp, preview);
   }
 

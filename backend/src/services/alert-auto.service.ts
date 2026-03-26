@@ -41,6 +41,16 @@ function parsePreferences(raw: string | null): ParsedPrefs {
 }
 
 export async function sendAutomaticContestNotifications(db: PrismaClient, runStartedAt: Date | number) {
+  const formatDateTime = (d: Date | null) =>
+    d
+      ? new Date(d).toLocaleString("es-AR", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "—";
   const since = contestNotificationSince(runStartedAt);
   const alerts = await db.alert.findMany({
     where: { is_active: true },
@@ -152,7 +162,12 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
     const html = toNotify
       .map(
         (c) =>
-          `<p><strong>${c.title}</strong><br/>${c.school?.city ?? ""} – ${c.school?.department ?? ""} | ${c.subject?.name ?? ""}</p>`,
+          `<p><strong>${c.title}</strong><br/>` +
+          `Fecha concurso: ${formatDateTime(c.date)}<br/>` +
+          `Horas: ${c.hours_to_cover ?? "—"}<br/>` +
+          `Materia/Cargo: ${c.subject?.name ?? "—"}<br/>` +
+          `${c.school?.city ?? ""} – ${c.school?.department ?? ""}<br/>` +
+          `<a href="${c.source_url ?? ""}">Ver fuente</a></p>`,
       )
       .join("");
 
@@ -179,11 +194,13 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
     let whatsappSent = false;
     if (whatsapp) {
       try {
-        const formatDate = (d: Date | null) =>
-          d ? new Date(d).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
         const lines = toNotify.map(
           (c) =>
-            `• ${c.title} (${formatDate(c.publication_date ?? c.date)})\n  ${c.source_url}`
+            `• ${c.title}\n` +
+            `  Fecha concurso: ${formatDateTime(c.date)}\n` +
+            `  Horas: ${c.hours_to_cover ?? "—"}\n` +
+            `  Materia/Cargo: ${c.subject?.name ?? "—"}\n` +
+            `  ${c.source_url}`
         );
         const preview = `[Concursos] ${toNotify.length} nuevo(s) concurso(s) para tus filtros:\n\n${lines.join("\n\n")}${email ? `\n\nTambién enviamos el detalle a ${email}.` : ""}`;
         whatsappSent = await sendWhatsappMessage(whatsapp, preview);
