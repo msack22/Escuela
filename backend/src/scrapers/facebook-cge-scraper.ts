@@ -18,6 +18,18 @@ function isTorProxyError(error: unknown): boolean {
   );
 }
 
+async function createBrowserWithoutProxy(): Promise<{ browser: Browser; facebookContextUsesTor: boolean }> {
+  const context = await chromium.launchPersistentContext(FB_USER_DATA_DIR, {
+    headless: false,
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+  });
+  facebookScraperLogger.info("Facebook scraper → browser started without Tor proxy", {
+    facebook_context_uses_tor: false,
+  });
+  // @ts-expect-error – adaptamos BrowserContext a la interfaz mínima usada.
+  return { browser: context, facebookContextUsesTor: false };
+}
+
 /**
  * Página de Facebook + departamento al que se asocian los concursos creados.
  * El feed puede enlazar convocatorias de varias zonas, pero el canal es de una DDE concreta:
@@ -108,16 +120,7 @@ async function createBrowser(): Promise<{ browser: Browser; facebookContextUsesT
       proxy: TOR_PROXY_URL,
       error: (error as Error)?.message ?? String(error),
     });
-
-    const context = await chromium.launchPersistentContext(FB_USER_DATA_DIR, {
-      headless: false,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-    });
-    facebookScraperLogger.info("Facebook scraper → browser started without Tor proxy", {
-      facebook_context_uses_tor: false,
-    });
-    // @ts-expect-error – adaptamos BrowserContext a la interfaz mínima usada.
-    return { browser: context, facebookContextUsesTor: false };
+    return createBrowserWithoutProxy();
   }
 }
 
@@ -598,7 +601,7 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
     cgeUrlOnlyYearMonth: filterYm,
   });
 
-  const { browser, facebookContextUsesTor } = await createBrowser();
+  let { browser, facebookContextUsesTor } = await createBrowser();
   let created = 0;
 
   // Normalizamos URLs para deduplicación consistente:
@@ -614,14 +617,40 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
   try {
     for (const fbPage of FACEBOOK_PAGES) {
       const pageUrl = fbPage.pageUrl;
-      const page = await browser.newPage({
-        userAgent:
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        viewport: { width: 1280, height: 720 },
-      });
-      page.setDefaultTimeout(60000);
+      const openPage = async () => {
+        const page = await browser.newPage({
+          userAgent:
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          viewport: { width: 1280, height: 720 },
+        });
+        page.setDefaultTimeout(60000);
+        return page;
+      };
 
-      await ensureLoggedIn(page, pageUrl);
+      let page = await openPage();
+      try {
+        await ensureLoggedIn(page, pageUrl);
+      } catch (err) {
+        // Importante: aunque el launch del contexto con proxy haya funcionado, la navegación puede fallar
+        // si Tor no está levantado o el proxy se cae. En ese caso, relanzamos el contexto sin proxy.
+        if (facebookContextUsesTor && isTorProxyError(err)) {
+          facebookScraperLogger.warn(
+            "Facebook scraper → navegación falló con Tor/proxy; relanzando contexto sin proxy",
+            {
+              pageUrl,
+              proxy: TOR_PROXY_URL,
+              error: (err as Error)?.message ?? String(err),
+            },
+          );
+          await page.close().catch(() => undefined);
+          await browser.close().catch(() => undefined);
+          ({ browser, facebookContextUsesTor } = await createBrowserWithoutProxy());
+          page = await openPage();
+          await ensureLoggedIn(page, pageUrl);
+        } else {
+          throw err;
+        }
+      }
 
       // Solo tomamos los primeros posts recientes de la página de Facebook.
       // Limite razonable para no scrollear de más.
