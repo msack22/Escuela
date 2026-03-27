@@ -46,7 +46,7 @@ const FACEBOOK_PAGES: FacebookCgePageConfig[] = [
   {
     pageUrl: "https://www.facebook.com/ddeislasdelibicuy",
     departmentSlug: "islas-del-ibicuy",
-    departmentName: "Islas Del Ibicuy",
+    departmentName: "Islas del Ibicuy",
   },
 ];
 
@@ -742,6 +742,22 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
             department_id: department.id,
           },
         });
+      } else {
+        // Mantener consistencia del feed Facebook: siempre Islas del Ibicuy.
+        if (
+          school.city !== fbPage.departmentName ||
+          school.department !== fbPage.departmentName ||
+          school.department_id !== department.id
+        ) {
+          school = await prisma.school.update({
+            where: { id: school.id },
+            data: {
+              city: fbPage.departmentName,
+              department: fbPage.departmentName,
+              department_id: department.id,
+            },
+          });
+        }
       }
       for (const p of posts) {
         // Si dentro del post hay un link al CGE, lo usamos como URL principal

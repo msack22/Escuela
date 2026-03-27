@@ -3,7 +3,7 @@ import { contestSearchService } from "./contest-search.service.js";
 import { emailNotifier } from "../infrastructure/email-notifier.js";
 import { isEmailConfigured } from "../config.js";
 import { sendWhatsappMessage } from "../infrastructure/whatsapp-web-notifier.js";
-import { appLogger } from "../lib/logger.js";
+import { alertsApiLogger } from "../lib/logger.js";
 
 function escapeHtml(s: string): string {
   return s
@@ -50,7 +50,7 @@ export async function handleTestContestNotifications(
     return { error: "La alerta no tiene email ni WhatsApp (ni usuario asociado)", statusCode: 400 };
   }
 
-  appLogger.info("TestContestNotifications datos", {
+  alertsApiLogger.info("TestContestNotifications datos", {
     alertId,
     userId: alert.user_id,
     email_from_alert: alert.email_address,

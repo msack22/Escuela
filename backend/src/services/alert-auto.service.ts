@@ -2,7 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { isEmailConfigured } from "../config.js";
 import { emailNotifier } from "../infrastructure/email-notifier.js";
 import { sendWhatsappMessage } from "../infrastructure/whatsapp-web-notifier.js";
-import { appLogger } from "../lib/logger.js";
+import { alertsApiLogger } from "../lib/logger.js";
 
 type ParsedPrefs = { subjects: string[]; departments: string[] };
 
@@ -72,7 +72,7 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
     },
   });
 
-  appLogger.info("AlertAuto → ventana de concursos recientes", {
+  alertsApiLogger.info("AlertAuto → ventana de concursos recientes", {
     since: since.toISOString(),
     runStartedAt:
       typeof runStartedAt === "number"
@@ -83,7 +83,7 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
   });
 
   if (!contests.length) {
-    appLogger.info(
+    alertsApiLogger.info(
       "AlertAuto → ningún concurso con created_at en la ventana (¿0 creados en este scraping o ya existían?)",
     );
     return {
@@ -115,7 +115,7 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
     });
 
     if (!filtered.length) {
-      appLogger.info("AlertAuto → alerta sin concursos que coincidan con filtros", {
+      alertsApiLogger.info("AlertAuto → alerta sin concursos que coincidan con filtros", {
         alertId: alert.id,
         filterDepartments: [...departmentSet],
         filterSubjects: [...subjectSet],
@@ -140,7 +140,7 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
     const alreadySentIds = new Set(existing.map((e) => e.contest_id));
     const toNotify = filtered.filter((c) => !alreadySentIds.has(c.id));
     if (!toNotify.length) {
-      appLogger.info("AlertAuto → concursos ya notificados antes para esta alerta", {
+      alertsApiLogger.info("AlertAuto → concursos ya notificados antes para esta alerta", {
         alertId: alert.id,
         matchedInWindow: filtered.length,
       });
@@ -151,7 +151,7 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
     const email = ((alert.email_address || user?.email) ?? "").trim();
     const whatsapp = ((alert.whatsapp_number || user?.phone_number) ?? "").trim();
     if (!email && !whatsapp) {
-      appLogger.warn("AlertAuto → alerta con concursos para avisar pero sin email ni WhatsApp", {
+      alertsApiLogger.warn("AlertAuto → alerta con concursos para avisar pero sin email ni WhatsApp", {
         alertId: alert.id,
         toNotifyCount: toNotify.length,
       });
@@ -174,7 +174,7 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
     let emailSent = false;
     if (email) {
       if (!isEmailConfigured()) {
-        appLogger.warn("AlertAuto → email configurado en la alerta pero el servidor no tiene mail (Brevo/SendGrid)", {
+        alertsApiLogger.warn("AlertAuto → email configurado en la alerta pero el servidor no tiene mail (Brevo/SendGrid)", {
           alertId: alert.id,
           email,
         });
@@ -182,7 +182,7 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
         try {
           emailSent = await emailNotifier.send({ to: email, subject, html });
         } catch (err) {
-          appLogger.error("AlertAuto → failed to send email", {
+          alertsApiLogger.error("AlertAuto → failed to send email", {
             alertId: alert.id,
             email,
             error: (err as Error)?.message ?? String(err),
@@ -205,10 +205,10 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
         const preview = `[Concursos] ${toNotify.length} nuevo(s) concurso(s) para tus filtros:\n\n${lines.join("\n\n")}${email ? `\n\nTambién enviamos el detalle a ${email}.` : ""}`;
         whatsappSent = await sendWhatsappMessage(whatsapp, preview);
         if (whatsappSent) {
-          appLogger.info("AlertAuto → WhatsApp sent for alert", { alertId: alert.id, whatsapp });
+          alertsApiLogger.info("AlertAuto → WhatsApp sent for alert", { alertId: alert.id, whatsapp });
         }
       } catch (err) {
-        appLogger.error("AlertAuto → failed to send WhatsApp", {
+        alertsApiLogger.error("AlertAuto → failed to send WhatsApp", {
           alertId: alert.id,
           whatsapp,
           error: (err as Error)?.message ?? String(err),
@@ -230,7 +230,7 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
       });
       notificationsCreated += toNotify.length;
 
-      appLogger.info("AlertAuto → notifications sent for alert", {
+      alertsApiLogger.info("AlertAuto → notifications sent for alert", {
         alertId: alert.id,
         email: email || null,
         whatsapp: whatsapp || null,
@@ -240,7 +240,7 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
       });
 
       if ((!!email && !emailSent) || (!!whatsapp && !whatsappSent)) {
-        appLogger.warn(
+        alertsApiLogger.warn(
           "AlertAuto → se notificó por al menos un canal, pero otro falló (no se reintentará para estos concursos)",
           {
             alertId: alert.id,
@@ -253,7 +253,7 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
         );
       }
     } else {
-      appLogger.warn(
+      alertsApiLogger.warn(
         "AlertAuto → había concursos para notificar pero no se envió ni mail ni WhatsApp (no se marca como notificado)",
         {
           alertId: alert.id,

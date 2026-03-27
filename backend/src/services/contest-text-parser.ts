@@ -122,16 +122,33 @@ function extractSubjectName(text: string): string | undefined {
     return s;
   };
 
+  const extractUnidadCurricular = (line: string): string | undefined => {
+    const m = line.match(/\bunidad\s+curricular\s*:\s*([^\n.]+)\b/i);
+    if (!m) return undefined;
+    const candidate = cleanSubject(m[1]);
+    if (candidate.length >= 3 && candidate.length <= 120) return candidate;
+    return undefined;
+  };
+
+  for (const line of lines) {
+    const uc = extractUnidadCurricular(line);
+    if (uc) return uc;
+  }
+
   for (const line of lines) {
     // Ej: "04 hs Maestra Domiciliaria Hospitalaria. Modalidad común..."
     const m = line.match(/(?:^|[.;,:]\s+)\s*[•*\-]?\s*(\d{1,2})\s*hs?\b\.?[:\s-]*(.+)$/i);
     if (!m) continue;
+    // Si viene "Unidad Curricular: ...", la preferimos por sobre "Cátedras/Formato/..." en esa línea.
+    const uc = extractUnidadCurricular(line);
+    if (uc) return uc;
     const tail = cleanSubject(
       m[2]
       .split(/[.;]|Modalidad|STF|Turno|horario/i)[0]
       .trim()
       .replace(/\s+/g, " "),
     );
+    if (/^c[aá]tedra?s?\b/i.test(tail)) continue;
     if (tail.length >= 3 && tail.length <= 120) return tail;
   }
 
@@ -139,6 +156,8 @@ function extractSubjectName(text: string): string | undefined {
     // Ej: "2 HC FISICA Y QUIMICA – 2° 2° – STF – T. TARDE"
     const m = line.match(/(?:^|[.;,:]\s+)\s*[•*\-]?\s*(\d{1,2})\s*HC\b\.?[:\s-]*(.+)$/i);
     if (!m) continue;
+    const uc = extractUnidadCurricular(line);
+    if (uc) return uc;
     const tail = cleanSubject(
       m[2]
       .split(/[–-]|STF|SUPL|titular|turno|t\.\s*ma[nñ]ana|t\.\s*tarde/i)[0]
