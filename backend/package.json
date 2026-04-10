@@ -17,6 +17,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.87.0",
     "@fastify/cors": "^10.0.1",
     "@prisma/client": "^5.22.0",
     "axios": "^1.7.7",

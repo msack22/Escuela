@@ -1,4 +1,4 @@
-type ParsedContestFields = {
+export type ParsedContestFields = {
   publicationDate?: Date;
   contestDate?: Date;
   level?: string;
@@ -185,6 +185,53 @@ function extractSchedule(text: string): string | undefined {
   );
   const joined = picked.join("\n").trim();
   return joined || undefined;
+}
+
+/**
+ * Enriches regex-parsed fields with AI when critical fields are missing.
+ *
+ * Strategy:
+ * - AI is called only when subjectName OR hoursToCover are missing from regex.
+ * - Regex results take priority: AI only fills empty slots.
+ * - contestDate from AI is parsed and used only if regex did not find one.
+ * - If ANTHROPIC_API_KEY is not set, this is a no-op.
+ */
+export async function enrichContestFieldsWithAI(
+  fields: ParsedContestFields,
+  rawText: string,
+): Promise<ParsedContestFields> {
+  const needsAI = !fields.subjectName || !fields.hoursToCover;
+  if (!needsAI) return fields;
+
+  // Lazy import to avoid loading the SDK when AI is not needed
+  const { parseContestWithAI } = await import("./ai-parser.service.js");
+  const ai = await parseContestWithAI(rawText);
+
+  const merged: ParsedContestFields = { ...fields };
+
+  if (!merged.subjectName && ai.subjectName) {
+    merged.subjectName = ai.subjectName;
+  }
+  if (!merged.hoursToCover && ai.hoursToCover) {
+    merged.hoursToCover = ai.hoursToCover;
+  }
+  if (!merged.shift && ai.shift) {
+    merged.shift = ai.shift;
+  }
+  if (!merged.level && ai.level) {
+    merged.level = ai.level;
+  }
+  if (!merged.schedule && ai.schedule) {
+    merged.schedule = ai.schedule;
+  }
+  if (!merged.contestDate && ai.contestDate) {
+    const parsed = new Date(ai.contestDate);
+    if (!Number.isNaN(parsed.getTime())) {
+      merged.contestDate = parsed;
+    }
+  }
+
+  return merged;
 }
 
 export function extractContestFieldsFromText(input: {

@@ -1,7 +1,10 @@
 import type { PrismaClient } from "@prisma/client";
 import { config } from "../config.js";
 import { appLogger, cgeScraperLogger } from "../lib/logger.js";
-import { extractContestFieldsFromText } from "../services/contest-text-parser.js";
+import {
+  extractContestFieldsFromText,
+  enrichContestFieldsWithAI,
+} from "../services/contest-text-parser.js";
 import {
   fetchWithAxios,
   fetchWithPlaywright,
@@ -593,13 +596,17 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
       where: { source_url: c.url, source_name: SOURCE_NAME },
     });
     if (!existing) {
-      const structured = extractContestFieldsFromText({
+      const regexFields = extractContestFieldsFromText({
         title: c.title,
         description: c.description,
         fallbackPublicationDate: c.publishedAt ?? fallbackDate,
         fallbackContestDate: c.contestDate,
         fallbackLevel: c.level,
       });
+      const structured = await enrichContestFieldsWithAI(
+        regexFields,
+        `${c.title}\n${c.description ?? ""}`.trim(),
+      );
       const publicationDate = structured.publicationDate ?? c.publishedAt ?? fallbackDate;
       // Si desde la nota individual pudimos extraer una fecha concreta de concurso,
       // la usamos como `date` principal; si no, usamos la fecha de publicación.
