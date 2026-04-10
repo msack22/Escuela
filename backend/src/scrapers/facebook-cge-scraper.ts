@@ -161,9 +161,9 @@ async function scrollAndCollectPosts(page: Page, maxPosts: number): Promise<Face
   let stableHeightIterations = 0;
   let iteration = 0;
   // Los concursos relevantes suelen estar arriba del feed; no hace falta scrollear como 50+ veces.
-  const minScrollIterations = 8;
-  /** Tope duro: no seguir bajando más allá de esto (p. ej. ~20 pasadas). */
-  const maxScrollIterations = 20;
+  const minScrollIterations = 10;
+  /** Tope duro: no seguir bajando más allá de esto. */
+  const maxScrollIterations = 35;
 
   while (posts.length < maxPosts && iteration < maxScrollIterations) {
     iteration += 1;
@@ -655,7 +655,7 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
 
       // Solo tomamos los primeros posts recientes de la página de Facebook.
       // Limite razonable para no scrollear de más.
-      const posts = await scrollAndCollectPosts(page, 22);
+      const posts = await scrollAndCollectPosts(page, 40);
       facebookScraperLogger.info("Posts encontrados en Facebook", {
         pageUrl,
         departmentSlug: fbPage.departmentSlug,
@@ -689,7 +689,7 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
           }
           return true;
         })
-        .slice(0, 22);
+        .slice(0, 40);
       for (const p of postsToEnrich) {
         const enrichTargetIsCge = isCgeHostUrl(p.postUrl);
         facebookScraperLogger.info("Facebook scraper → enriqueciendo post", {

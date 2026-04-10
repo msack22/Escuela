@@ -143,7 +143,13 @@
     document.querySelectorAll('a[href*="cge%2Eentrerios"]'),
     document.querySelectorAll('a[href*="l.facebook.com/l.php"]'),
     document.querySelectorAll('a[href*="lm.facebook.com/l.php"]'),
+    document.querySelectorAll('a[href*="www.facebook.com/l.php"]'),
     document.querySelectorAll('a[href*="/l.php?"][href*="entrerios.gov"]'),
+    document.querySelectorAll('a[href*="/l.php?"][href*="cge"]'),
+    document.querySelectorAll('[data-lynx-uri*="cge.entrerios.gov.ar"]'),
+    document.querySelectorAll('[data-href*="cge.entrerios.gov.ar"]'),
+    document.querySelectorAll('[data-uri*="cge.entrerios.gov.ar"]'),
+    document.querySelectorAll('[data-lynx-uri*="entrerios.gov"]'),
   ];
   for (var eli = 0; eli < earlyLists.length; eli++) {
     var nl = earlyLists[eli];
@@ -152,7 +158,13 @@
   var allCgeAnchors = Array.from(anchorSetEarly);
   for (pi = 0; pi < allCgeAnchors.length; pi++) {
     a = allCgeAnchors[pi];
-    href = a.href || a.getAttribute("href") || "";
+    href =
+      a.href ||
+      a.getAttribute("href") ||
+      a.getAttribute("data-lynx-uri") ||
+      a.getAttribute("data-href") ||
+      a.getAttribute("data-uri") ||
+      "";
     if (!href) continue;
     unwrapped = unwrapFacebookOutboundHref(href);
     cgeCandidate = tryNormalizeCgeContestUrl(unwrapped);
@@ -305,9 +317,11 @@
     "a[role='link'][href*='/l.php']",
     "a[role='link'][href*='l.facebook.com']",
     "a[role='link'][href*='lm.facebook.com']",
+    "a[role='link'][href*='www.facebook.com/l.php']",
     /** Enlaces outbound sin role="link" (común en móvil / feed). */
     "a[href*='l.facebook.com/l.php']",
     "a[href*='lm.facebook.com/l.php']",
+    "a[href*='www.facebook.com/l.php']",
   ].join(", ");
   var preferredContestAnchors = Array.from(document.querySelectorAll(preferredSel));
   var text;
@@ -487,7 +501,6 @@
   var directMatchesPreNormCount = directMatches.length;
 
   var rawUrl;
-  var cleaned;
   var normalized;
   for (pi = 0; pi < directMatches.length; pi++) {
     rawUrl = directMatches[pi];
