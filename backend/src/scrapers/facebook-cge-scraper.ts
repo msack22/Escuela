@@ -160,10 +160,8 @@ async function scrollAndCollectPosts(page: Page, maxPosts: number): Promise<Face
   });
   let stableHeightIterations = 0;
   let iteration = 0;
-  // Posts de hasta ~2 semanas pueden estar en el feed; necesitamos scroll suficiente.
-  const minScrollIterations = 15;
-  /** Tope duro: cubrir posts de hasta 2 semanas atrás. */
-  const maxScrollIterations = 60;
+  const minScrollIterations = 10;
+  const maxScrollIterations = 20;
 
   /**
    * Reutilizable: escanea con Playwright los anchors directos al CGE visibles en el DOM actual.
