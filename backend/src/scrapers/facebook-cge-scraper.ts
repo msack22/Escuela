@@ -163,7 +163,7 @@ async function scrollAndCollectPosts(page: Page, maxPosts: number): Promise<Face
   // Los concursos relevantes suelen estar arriba del feed; no hace falta scrollear como 50+ veces.
   const minScrollIterations = 10;
   /** Tope duro: no seguir bajando más allá de esto. */
-  const maxScrollIterations = 35;
+  const maxScrollIterations = 20;
 
   while (posts.length < maxPosts && iteration < maxScrollIterations) {
     iteration += 1;
@@ -671,6 +671,25 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
       .split("?")[0]
       .replace(/\/$/, "");
 
+  /**
+   * El CGE usa WordPress que genera slugs numerados cuando hay posts con slugs similares:
+   * /ceibas, /ceibas-2, /ceibas-90, /ceibas-118...
+   * Para deduplicar, normalizamos quitando el sufijo numérico final del slug.
+   * Así /ceibas-112 y /ceibas-118 se tratan como el mismo concurso.
+   */
+  const slugBase = (url: string) => url.replace(/-\d+$/, "");
+
+  /** Detecta respuestas de error del CGE (página en construcción, etc.) */
+  const isJunkContent = (text: string): boolean => {
+    const t = text.toLowerCase();
+    return (
+      t.includes("página solicitada está en construcción") ||
+      t.includes("pagina solicitada esta en construccion") ||
+      t.includes("en construcción\n\ngobierno de entre") ||
+      (t.includes("gobierno de entre ríos") && t.length < 120)
+    );
+  };
+
   try {
     for (const fbPage of FACEBOOK_PAGES) {
       const pageUrl = fbPage.pageUrl;
@@ -815,6 +834,9 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
           });
         }
       }
+      // Extendemos el set de URLs existentes con los slug base para detectar duplicados numerados
+      const existingSlugBaseSet = new Set(Array.from(existingUrlSet).map(slugBase));
+
       for (const p of posts) {
         // Si dentro del post hay un link al CGE, lo usamos como URL principal
         // del concurso; si no, usamos el permalink del propio post.
@@ -827,9 +849,17 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
           );
           continue;
         }
-        if (existingUrlSet.has(sourceUrl)) {
+        if (existingUrlSet.has(sourceUrl) || existingSlugBaseSet.has(slugBase(sourceUrl))) {
           facebookScraperLogger.info("Facebook scraper → concurso ya existente, se omite", {
             sourceUrl,
+          });
+          continue;
+        }
+        // Filtrar páginas de error del CGE (ej: "La página solicitada está en construcción")
+        if (isJunkContent(p.text)) {
+          facebookScraperLogger.info("Facebook scraper → se omite (contenido es página de error)", {
+            sourceUrl,
+            textPreview: p.text.slice(0, 80),
           });
           continue;
         }
@@ -869,6 +899,9 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
             is_active: true,
           },
         });
+        // Registrar en ambos sets para evitar duplicados dentro del mismo batch
+        existingUrlSet.add(sourceUrl);
+        existingSlugBaseSet.add(slugBase(sourceUrl));
         created++;
       }
 
