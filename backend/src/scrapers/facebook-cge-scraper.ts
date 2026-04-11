@@ -283,13 +283,69 @@ async function scrollAndCollectPosts(page: Page, maxPosts: number): Promise<Face
       window.scrollBy(0, Math.max(320, Math.floor(h * 0.72)));
     });
     await page.waitForTimeout(1800 + Math.random() * 1600);
-    /** De vez en cuando al final del documento para virtualización; pocas veces para no ir “muy abajo”. */
+    /** De vez en cuando al final del documento para virtualización; pocas veces para no ir "muy abajo". */
     if (iteration % 5 === 0 && iteration <= 15) {
       await page.evaluate(function () {
         window.scrollTo(0, document.body.scrollHeight);
       });
       await page.waitForTimeout(1400 + Math.random() * 900);
     }
+
+    // -- Playwright-native fallback ------------------------------------------
+    // El IIFE browser script puede perder links directos al CGE cuando:
+    //   a) el preview card del post carga con delay (lazy render de React)
+    //   b) Facebook ya virtualizo el post (lo quito del DOM) antes de que el IIFE lo viera
+    // Aqui buscamos con Playwright DESPUES del scroll+wait, cuando el nuevo contenido
+    // ya cargo, y antes de que el viejo sea virtualizado.
+    if (posts.length < maxPosts) {
+      const nativeCgeLinks = await page
+        .$$eval(
+          'a[href*="cge.entrerios.gov.ar"], a[href*="cge%2Eentrerios"]',
+          (anchors: Element[]) =>
+            (anchors as HTMLAnchorElement[]).map((a) => {
+              const href = a.href || a.getAttribute("href") || "";
+              // Intentar obtener el texto del post contenedor
+              const postRoot = a.closest(
+                'article, [role="article"], div[data-ad-rendering-role="image"], div[data-ad-rendering-role="story_message"]',
+              ) as HTMLElement | null;
+              const text = postRoot?.innerText?.trim() || a.innerText?.trim() || "";
+              return { href, text };
+            }),
+        )
+        .catch(() => [] as { href: string; text: string }[]);
+
+      for (const link of nativeCgeLinks) {
+        if (!link.href) continue;
+        try {
+          const u = new URL(link.href);
+          if (!u.hostname.toLowerCase().includes("cge.entrerios.gov.ar")) continue;
+          const pth = u.pathname.toLowerCase();
+          if (!/\/\d{4}\/\d{2}\//.test(pth)) continue;
+          if (pth.includes("/wp-content/") || pth.includes("/noticias/")) continue;
+          if (!/(concurso|convocatoria|cargo|oposicion|llamado)/.test(pth)) continue;
+          if (!isCgeUrlCurrentYearMonth(link.href)) continue;
+          u.search = "";
+          u.hash = "";
+          const normalized = u.toString().replace(/\/$/, "");
+          if (posts.find((p) => p.postUrl === normalized || p.cgeUrl === normalized)) continue;
+          facebookScraperLogger.info("Facebook scraper → link CGE detectado via Playwright nativo", {
+            normalized,
+            iteration,
+          });
+          posts.push({
+            pageUrl: page.url(),
+            postUrl: normalized,
+            text: link.text || "Facebook post (direct CGE link)",
+            cgeUrl: normalized,
+          });
+          if (posts.length >= maxPosts) break;
+        } catch {
+          // URL inválida, ignorar
+        }
+      }
+    }
+    // -------------------------------------------------------------------------
+
     const newHeight = await page.evaluate(function () {
       return document.body.scrollHeight;
     });
