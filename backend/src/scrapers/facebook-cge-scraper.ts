@@ -160,10 +160,65 @@ async function scrollAndCollectPosts(page: Page, maxPosts: number): Promise<Face
   });
   let stableHeightIterations = 0;
   let iteration = 0;
-  // Los concursos relevantes suelen estar arriba del feed; no hace falta scrollear como 50+ veces.
-  const minScrollIterations = 10;
-  /** Tope duro: no seguir bajando más allá de esto. */
-  const maxScrollIterations = 20;
+  // Posts de hasta ~2 semanas pueden estar en el feed; necesitamos scroll suficiente.
+  const minScrollIterations = 15;
+  /** Tope duro: cubrir posts de hasta 2 semanas atrás. */
+  const maxScrollIterations = 60;
+
+  /**
+   * Reutilizable: escanea con Playwright los anchors directos al CGE visibles en el DOM actual.
+   * Se llama antes del loop Y dentro de cada iteración.
+   */
+  const scanCgeAnchorsNative = async (currentIteration: number) => {
+    if (posts.length >= maxPosts) return;
+    const nativeCgeLinks = await page
+      .$$eval(
+        'a[href*="cge.entrerios.gov.ar"], a[href*="cge%2Eentrerios"]',
+        (anchors: Element[]) =>
+          (anchors as HTMLAnchorElement[]).map((a) => {
+            const href = a.href || a.getAttribute("href") || "";
+            const postRoot = a.closest(
+              'article, [role="article"], div[data-ad-rendering-role="image"], div[data-ad-rendering-role="story_message"]',
+            ) as HTMLElement | null;
+            const text = postRoot?.innerText?.trim() || a.innerText?.trim() || "";
+            return { href, text };
+          }),
+      )
+      .catch(() => [] as { href: string; text: string }[]);
+
+    for (const link of nativeCgeLinks) {
+      if (!link.href) continue;
+      try {
+        const u = new URL(link.href);
+        if (!u.hostname.toLowerCase().includes("cge.entrerios.gov.ar")) continue;
+        const pth = u.pathname.toLowerCase();
+        if (!/\/\d{4}\/\d{2}\//.test(pth)) continue;
+        if (pth.includes("/wp-content/") || pth.includes("/noticias/")) continue;
+        if (!/(concurso|convocatoria|cargo|oposicion|llamado)/.test(pth)) continue;
+        if (!isCgeUrlCurrentYearMonth(link.href)) continue;
+        u.search = "";
+        u.hash = "";
+        const normalized = u.toString().replace(/\/$/, "");
+        if (posts.find((p) => p.postUrl === normalized || p.cgeUrl === normalized)) continue;
+        facebookScraperLogger.info("Facebook scraper → link CGE detectado via Playwright nativo", {
+          normalized,
+          iteration: currentIteration,
+        });
+        posts.push({
+          pageUrl: page.url(),
+          postUrl: normalized,
+          text: link.text || "Facebook post (direct CGE link)",
+          cgeUrl: normalized,
+        });
+        if (posts.length >= maxPosts) break;
+      } catch {
+        // URL inválida, ignorar
+      }
+    }
+  };
+
+  // Scan inicial: capturar links CGE ya visibles antes de cualquier scroll
+  await scanCgeAnchorsNative(0);
 
   while (posts.length < maxPosts && iteration < maxScrollIterations) {
     iteration += 1;
@@ -291,60 +346,8 @@ async function scrollAndCollectPosts(page: Page, maxPosts: number): Promise<Face
       await page.waitForTimeout(1400 + Math.random() * 900);
     }
 
-    // -- Playwright-native fallback ------------------------------------------
-    // El IIFE browser script puede perder links directos al CGE cuando:
-    //   a) el preview card del post carga con delay (lazy render de React)
-    //   b) Facebook ya virtualizo el post (lo quito del DOM) antes de que el IIFE lo viera
-    // Aqui buscamos con Playwright DESPUES del scroll+wait, cuando el nuevo contenido
-    // ya cargo, y antes de que el viejo sea virtualizado.
-    if (posts.length < maxPosts) {
-      const nativeCgeLinks = await page
-        .$$eval(
-          'a[href*="cge.entrerios.gov.ar"], a[href*="cge%2Eentrerios"]',
-          (anchors: Element[]) =>
-            (anchors as HTMLAnchorElement[]).map((a) => {
-              const href = a.href || a.getAttribute("href") || "";
-              // Intentar obtener el texto del post contenedor
-              const postRoot = a.closest(
-                'article, [role="article"], div[data-ad-rendering-role="image"], div[data-ad-rendering-role="story_message"]',
-              ) as HTMLElement | null;
-              const text = postRoot?.innerText?.trim() || a.innerText?.trim() || "";
-              return { href, text };
-            }),
-        )
-        .catch(() => [] as { href: string; text: string }[]);
-
-      for (const link of nativeCgeLinks) {
-        if (!link.href) continue;
-        try {
-          const u = new URL(link.href);
-          if (!u.hostname.toLowerCase().includes("cge.entrerios.gov.ar")) continue;
-          const pth = u.pathname.toLowerCase();
-          if (!/\/\d{4}\/\d{2}\//.test(pth)) continue;
-          if (pth.includes("/wp-content/") || pth.includes("/noticias/")) continue;
-          if (!/(concurso|convocatoria|cargo|oposicion|llamado)/.test(pth)) continue;
-          if (!isCgeUrlCurrentYearMonth(link.href)) continue;
-          u.search = "";
-          u.hash = "";
-          const normalized = u.toString().replace(/\/$/, "");
-          if (posts.find((p) => p.postUrl === normalized || p.cgeUrl === normalized)) continue;
-          facebookScraperLogger.info("Facebook scraper → link CGE detectado via Playwright nativo", {
-            normalized,
-            iteration,
-          });
-          posts.push({
-            pageUrl: page.url(),
-            postUrl: normalized,
-            text: link.text || "Facebook post (direct CGE link)",
-            cgeUrl: normalized,
-          });
-          if (posts.length >= maxPosts) break;
-        } catch {
-          // URL inválida, ignorar
-        }
-      }
-    }
-    // -------------------------------------------------------------------------
+    // Playwright-native fallback: capturar anchors directos al CGE en el DOM actual
+    await scanCgeAnchorsNative(iteration);
 
     const newHeight = await page.evaluate(function () {
       return document.body.scrollHeight;
@@ -588,9 +591,14 @@ async function enrichPostFromDetails(
       const prev = (post.text ?? "").trim();
       const looksPlaceholder =
         prev.length === 0 || /^Facebook post\b/i.test(prev) || prev.length < 60;
+      // No sobreescribir con contenido de error del CGE ("en construccion", etc.)
+      const newTextIsJunk =
+        /p[aá]gina solicitada est[aá] en construcci[oó]n/i.test(text) ||
+        (/gobierno de entre r[ií]os/i.test(text) && text.trim().length < 120);
       if (
         text &&
         text.trim().length > 0 &&
+        !newTextIsJunk &&
         (looksPlaceholder || text.trim().length >= prev.length)
       ) {
         post.text = text;
