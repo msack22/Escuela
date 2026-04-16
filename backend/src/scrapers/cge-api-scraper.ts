@@ -159,16 +159,12 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, "0");
 
-  // Traer solo los últimos 3 días a partir de hoy
+  // Ventana: desde hace 3 días (00:00:00) hasta el momento actual
   const threeDaysAgo = new Date(now);
   threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
   threeDaysAgo.setHours(0, 0, 0, 0);
   const afterDate = threeDaysAgo.toISOString().slice(0, 19);
-
-  const tomorrow = new Date(now);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  tomorrow.setHours(0, 0, 0, 0);
-  const beforeDate = tomorrow.toISOString().slice(0, 19);
+  const beforeDate = now.toISOString().slice(0, 19);
 
   appLogger.info("Iniciando CGE API scraper", { afterDate, beforeDate });
   cgeScraperLogger.info("CGE API scraper → inicio", { afterDate, beforeDate });
