@@ -68,5 +68,8 @@ echo "3) Se abrieron dos ventanas nuevas:"
 echo "   Backend:  http://localhost:8000"
 echo "   Frontend: http://localhost:3000"
 echo ""
-echo "Ya podes cerrar esta ventana sin afectar los servicios."
+echo "Manteniendo la Mac despierta con caffeinate (Ctrl+C para salir)..."
 echo ""
+
+# Evita que la Mac se duerma mientras los servidores estan corriendo
+caffeinate -i
