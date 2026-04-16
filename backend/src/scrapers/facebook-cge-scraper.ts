@@ -165,8 +165,8 @@ async function scrollAndCollectPosts(page: Page, maxPosts: number): Promise<Face
   });
   let stableHeightIterations = 0;
   let iteration = 0;
-  const minScrollIterations = 10;
-  const maxScrollIterations = 20;
+  const minScrollIterations = 5;
+  const maxScrollIterations = 10;
 
   /**
    * Reutilizable: escanea con Playwright los anchors directos al CGE visibles en el DOM actual.
