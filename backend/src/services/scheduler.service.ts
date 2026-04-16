@@ -7,7 +7,7 @@ import { sendAutomaticContestNotifications } from "./alert-auto.service.js";
 
 // Fuentes que el usuario puede elegir explícitamente desde el frontend.
 // "all" se maneja como valor implícito cuando no se envía ninguna fuente.
-const AVAILABLE_SOURCES = ["cge_api", "cge_simple", "cge_enterios_completo", "facebook_cge", "datos_abiertos_argentina", "puntos_digitales"];
+const AVAILABLE_SOURCES = ["cge_api"];
 
 // Zona horaria fija para el scheduler: horario de Argentina.
 const TIMEZONE = "America/Argentina/Buenos_Aires";
