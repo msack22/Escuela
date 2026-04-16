@@ -6,47 +6,31 @@ echo ""
 echo "==== Escuela - Backend (Node) y Frontend (Vite) ===="
 echo ""
 
-# 0) Verificar Tor (SOCKS5 en 127.0.0.1:9050)
+# 0) Verificar / levantar Tor (SOCKS5 en 127.0.0.1:9050)
 echo "0) Verificando Tor (SOCKS5 en 127.0.0.1:9050)..."
 echo ""
 
 if lsof -iTCP:9050 -sTCP:LISTEN -t &>/dev/null; then
   echo "Tor ya esta escuchando en 9050."
-else
-  TOR_PATHS=(
-    "$TOR_EXE_PATH"
-    "/Applications/Tor Browser.app/Contents/MacOS/Tor/tor"
-    "/usr/local/bin/tor"
-    "/opt/homebrew/bin/tor"
-  )
-  TOR_EXE=""
-  for p in "${TOR_PATHS[@]}"; do
-    if [ -n "$p" ] && [ -x "$p" ]; then
-      TOR_EXE="$p"
+elif command -v brew &>/dev/null && brew list tor &>/dev/null 2>&1; then
+  echo "Iniciando Tor via brew services..."
+  brew services start tor
+  TOR_OK=false
+  for i in $(seq 1 20); do
+    sleep 1
+    if lsof -iTCP:9050 -sTCP:LISTEN -t &>/dev/null; then
+      TOR_OK=true
       break
     fi
   done
-
-  if [ -z "$TOR_EXE" ]; then
-    echo "No se encontro tor. Define TOR_EXE_PATH o instala con: brew install tor"
-    echo "Seguimos sin Tor."
+  if $TOR_OK; then
+    echo "Tor listo en 127.0.0.1:9050"
   else
-    echo "Iniciando Tor desde: $TOR_EXE"
-    "$TOR_EXE" &
-    TOR_OK=false
-    for i in $(seq 1 30); do
-      sleep 1
-      if lsof -iTCP:9050 -sTCP:LISTEN -t &>/dev/null; then
-        TOR_OK=true
-        break
-      fi
-    done
-    if $TOR_OK; then
-      echo "Tor listo en 127.0.0.1:9050"
-    else
-      echo "Tor no quedo disponible en 9050 dentro de 30s. Revisar Tor manualmente."
-    fi
+    echo "Tor no quedo disponible en 9050 dentro de 20s. Revisar con: brew services info tor"
   fi
+else
+  echo "Tor no encontrado. Instala con: brew install tor"
+  echo "Seguimos sin Tor (el scraping funcionara sin rotacion de IP)."
 fi
 
 echo ""
