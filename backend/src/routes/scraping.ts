@@ -225,10 +225,9 @@ export const scrapingRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post("/run-cge-simple", async (req, reply) => {
-    const start = Date.now();
     try {
-      const count = await runCgeScraper(req.server.prisma);
-      return { message: "Scraping simplificado de CGE Entre Ríos finalizado", total_contests: count, scraped_at: new Date().toISOString(), source: "cge_simple", contests: [] };
+      const count = await runCgeApiScraper(req.server.prisma);
+      return { message: "Scraping CGE Entre Ríos finalizado", total_contests: count, scraped_at: new Date().toISOString(), source: "cge_api", contests: [] };
     } catch (e) {
       return reply.status(500).send({ detail: (e as Error).message });
     }
@@ -236,8 +235,8 @@ export const scrapingRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/run-cge-completo", async (req, reply) => {
     try {
-      const count = await runCgeScraper(req.server.prisma);
-      return { message: "Scraping completo de CGE Entre Ríos finalizado", total_contests: count, scraped_at: new Date().toISOString(), source: "cge_enterios_completo" };
+      const count = await runCgeApiScraper(req.server.prisma);
+      return { message: "Scraping CGE Entre Ríos finalizado", total_contests: count, scraped_at: new Date().toISOString(), source: "cge_api" };
     } catch (e) {
       return reply.status(500).send({ detail: (e as Error).message });
     }

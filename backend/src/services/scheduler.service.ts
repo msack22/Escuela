@@ -14,7 +14,7 @@ const TIMEZONE = "America/Argentina/Buenos_Aires";
 
 // Configuración por defecto del scheduler automático.
 let scheduledHours: number[] = [8, 12, 16, 20]; // 8, 12, 16 y 20 hs AR
-let autoSources: string[] = ["cge_simple", "facebook_cge"];
+let autoSources: string[] = ["cge_api"];
 
 let isRunning = false;
 let lastRun: string | null = null;
@@ -161,7 +161,7 @@ setInterval(async () => {
   const startedAt = new Date();
   schedulerService.setCycleProgress({
     running: true,
-    step: "Scheduler automático ejecutando scraping (CGE + Facebook)...",
+    step: "Scheduler automático ejecutando scraping (CGE API)...",
     source: autoSources.join(","),
   });
 
