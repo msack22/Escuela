@@ -3,7 +3,8 @@ import axios from 'axios';
 
 // En Vite las variables de entorno se acceden con import.meta.env
 // Por defecto apuntamos al backend FastAPI en el puerto 8000
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+export const API_BASE_URL = import.meta.env.VITE_API_URL ||
+  `http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:8000`;
 
 const api = axios.create({
   baseURL: API_BASE_URL,

@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../../services/api';
 import React, { useState, useEffect, useCallback } from 'react';
 
 // Interfaces para TypeScript
@@ -144,7 +145,7 @@ const ScrapingAlertsComponent = () => {
     // Simular estado inicial
     const fetchStatus = async () => {
       try {
-        const response = await fetch('http://localhost:8000/scraping-async/status');
+        const response = await fetch(API_BASE_URL + '/scraping-async/status');
         const data = await response.json();
         if (data.success) {
           setStatus(data.data);
@@ -164,7 +165,7 @@ const ScrapingAlertsComponent = () => {
   // Función para cerrar alerta
   const handleDismissAlert = useCallback(async (alertId: string) => {
     try {
-      await fetch(`http://localhost:8000/scraping-async/alerts/${alertId}`, {
+      await fetch(`${API_BASE_URL}/scraping-async/alerts/${alertId}`, {
         method: 'DELETE'
       });
       
@@ -177,7 +178,7 @@ const ScrapingAlertsComponent = () => {
   // Función para cerrar todas las alertas
   const handleClearAllAlerts = useCallback(async () => {
     try {
-      await fetch('http://localhost:8000/scraping-async/alerts', {
+      await fetch(API_BASE_URL + '/scraping-async/alerts', {
         method: 'DELETE'
       });
       
@@ -190,7 +191,7 @@ const ScrapingAlertsComponent = () => {
   // Función para iniciar scraping
   const handleStartScraping = useCallback(async (scraperType: string = 'modern') => {
     try {
-      const response = await fetch('http://localhost:8000/scraping-async/start', {
+      const response = await fetch(API_BASE_URL + '/scraping-async/start', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -211,7 +212,7 @@ const ScrapingAlertsComponent = () => {
   // Función para cancelar scraping
   const handleCancelScraping = useCallback(async () => {
     try {
-      const response = await fetch('http://localhost:8000/scraping-async/cancel', {
+      const response = await fetch(API_BASE_URL + '/scraping-async/cancel', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
