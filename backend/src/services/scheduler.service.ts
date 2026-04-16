@@ -1,12 +1,13 @@
 import { prisma } from "../db.js";
 import { runCgeScraper } from "../scrapers/cge-scraper.js";
 import { runFacebookCgeScraper } from "../scrapers/facebook-cge-scraper.js";
+import { runCgeApiScraper } from "../scrapers/cge-api-scraper.js";
 import { appLogger } from "../lib/logger.js";
 import { sendAutomaticContestNotifications } from "./alert-auto.service.js";
 
 // Fuentes que el usuario puede elegir explícitamente desde el frontend.
 // "all" se maneja como valor implícito cuando no se envía ninguna fuente.
-const AVAILABLE_SOURCES = ["cge_simple", "cge_enterios_completo", "facebook_cge", "datos_abiertos_argentina", "puntos_digitales"];
+const AVAILABLE_SOURCES = ["cge_api", "cge_simple", "cge_enterios_completo", "facebook_cge", "datos_abiertos_argentina", "puntos_digitales"];
 
 // Zona horaria fija para el scheduler: horario de Argentina.
 const TIMEZONE = "America/Argentina/Buenos_Aires";
@@ -171,9 +172,13 @@ setInterval(async () => {
   });
 
   try {
+    let apiCount = 0;
     let cgeCount = 0;
     let fbCount = 0;
 
+    if (autoSources.includes("cge_api")) {
+      apiCount = await runCgeApiScraper(prisma);
+    }
     if (autoSources.includes("cge_simple") || autoSources.includes("cge_enterios_completo")) {
       cgeCount = await runCgeScraper(prisma);
     }
@@ -181,7 +186,7 @@ setInterval(async () => {
       fbCount = await runFacebookCgeScraper(prisma);
     }
 
-    const total = cgeCount + fbCount;
+    const total = apiCount + cgeCount + fbCount;
 
     jobCount += 1;
     lastRun = startedAt.toISOString();

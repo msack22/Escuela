@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import { runCgeScraper } from "../scrapers/cge-scraper.js";
 import { runFacebookCgeScraper } from "../scrapers/facebook-cge-scraper.js";
+import { runCgeApiScraper } from "../scrapers/cge-api-scraper.js";
 import { schedulerService } from "../services/scheduler.service.js";
 import { sendAutomaticContestNotifications } from "../services/alert-auto.service.js";
 import { appLogger } from "../lib/logger.js";
@@ -16,20 +17,20 @@ export async function runScraperBySource(
   if (source === "all") {
     let total = 0;
 
-    appLogger.info("Scraping → running CGE scraper (all)");
-    const cgeCount = await runCgeScraper(prisma);
-    total += cgeCount;
+    appLogger.info("Scraping → running CGE API scraper (all)");
+    const apiCount = await runCgeApiScraper(prisma);
+    total += apiCount;
 
-    appLogger.info("Scraping → running Facebook CGE scraper (all)");
-    const fbCount = await runFacebookCgeScraper(prisma);
-    total += fbCount;
-
-    // Futuras fuentes (datos_abiertos_argentina, puntos_digitales, etc.) pueden sumarse aquí.
-
-    appLogger.info("Scraping → all scrapers finished", { total, cgeCount, fbCount });
+    appLogger.info("Scraping → all scrapers finished", { total, apiCount });
     return { count: total, success: true };
   }
 
+  if (source === "cge_api") {
+    const count = await runCgeApiScraper(prisma);
+    return { count, success: true };
+  }
+
+  // Scrapers legacy — mantenidos como backup
   if (source === "cge_simple" || source === "cge_enterios_completo") {
     const count = await runCgeScraper(prisma);
     return { count, success: true };

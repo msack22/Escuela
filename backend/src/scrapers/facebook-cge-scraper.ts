@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
+import axios from "axios";
 import path from "path";
 import { appLogger, facebookScraperLogger } from "../lib/logger.js";
 import { extractContestFieldsFromText } from "../services/contest-text-parser.js";
@@ -869,6 +870,106 @@ async function buildCurrentMonthSlugBases(
     }
   }
   return slugMaxMap;
+}
+
+/** Keywords que identifican publicaciones del departamento Islas del Ibicuy en la URL del CGE. */
+const IBICUY_URL_KEYWORDS = [
+  "ibicuy", "ceibas", "paranacito", "mazaruca", "giorgi", "islas-del-ibicuy",
+];
+
+/**
+ * Consulta la WordPress REST API del CGE para obtener todos los concursos del mes actual
+ * relacionados con el departamento Islas del Ibicuy.
+ *
+ * Categorías:
+ *  - 150: Concursos Nivel Primario  (NEP, escuelas nocturnas, etc. — no cubiertas por el scraper departamental)
+ *  - 151: Concursos Nivel Secundario (complementa el scraper departamental con rango de fecha completo)
+ *
+ * La REST API devuelve título + contenido HTML, por lo que los posts ya vienen con texto
+ * y no necesitan enriquecimiento posterior.
+ */
+async function fetchIbicuyContestsFromRestApi(filterYm: string): Promise<FacebookPost[]> {
+  const [year, month] = filterYm.split("/");
+  const afterDate = `${year}-${month}-01T00:00:00`;
+  // WordPress acepta "before" con el último día del mes; usamos el 1ro del mes siguiente.
+  const nextMonth = Number(month) === 12 ? `${Number(year) + 1}-01` : `${year}-${String(Number(month) + 1).padStart(2, "0")}`;
+  const beforeDate = `${nextMonth}-01T00:00:00`;
+
+  const WP_API = "https://cge.entrerios.gov.ar/wp-json/wp/v2/posts";
+  const CATEGORIES = [150, 151]; // primaria, secundaria
+  const found: FacebookPost[] = [];
+  const seenUrls = new Set<string>();
+
+  for (const categoryId of CATEGORIES) {
+    let page = 1;
+    while (true) {
+      try {
+        const { data } = await axios.get<
+          Array<{ id: number; link: string; title: { rendered: string }; content: { rendered: string } }>
+        >(WP_API, {
+          params: {
+            per_page: 100,
+            page,
+            after: afterDate,
+            before: beforeDate,
+            categories: categoryId,
+            orderby: "date",
+            order: "desc",
+            _fields: "id,link,title,content",
+          },
+          timeout: 20_000,
+        });
+
+        if (!Array.isArray(data) || data.length === 0) break;
+
+        for (const post of data) {
+          const link = (post.link ?? "").replace(/\/$/, "");
+          if (!link) continue;
+
+          const linkLower = link.toLowerCase();
+          const isIbicuy = IBICUY_URL_KEYWORDS.some((kw) => linkLower.includes(kw));
+          if (!isIbicuy) continue;
+          if (seenUrls.has(link)) continue;
+          seenUrls.add(link);
+
+          // Extraer texto plano desde el contenido HTML
+          const titleText = post.title?.rendered?.replace(/<[^>]+>/g, " ").trim() ?? "";
+          const contentText = post.content?.rendered?.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() ?? "";
+          const fullText = [titleText, contentText].filter(Boolean).join("\n\n");
+
+          facebookScraperLogger.info("Facebook scraper → REST API: concurso Ibicuy encontrado", {
+            url: link,
+            category: categoryId,
+            titlePreview: titleText.slice(0, 80),
+          });
+
+          found.push({
+            pageUrl: "https://cge.entrerios.gov.ar/",
+            postUrl: link,
+            text: fullText,
+            cgeUrl: link,
+          });
+        }
+
+        if (data.length < 100) break;
+        page++;
+      } catch (err) {
+        facebookScraperLogger.warn("Facebook scraper → REST API: error fetching posts", {
+          category: categoryId,
+          page,
+          error: (err as Error)?.message ?? String(err),
+        });
+        break;
+      }
+    }
+  }
+
+  facebookScraperLogger.info("Facebook scraper → REST API Ibicuy: total encontrados", {
+    count: found.length,
+    filterYm,
+  });
+
+  return found;
 }
 
 export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<number> {

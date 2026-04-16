@@ -1,0 +1,340 @@
+import type { PrismaClient } from "@prisma/client";
+import axios from "axios";
+import { appLogger, cgeScraperLogger } from "../lib/logger.js";
+import {
+  extractContestFieldsFromText,
+  enrichContestFieldsWithAI,
+} from "../services/contest-text-parser.js";
+
+const SOURCE_NAME = "CGE Entre Ríos API";
+const WP_API = "https://cge.entrerios.gov.ar/wp-json/wp/v2/posts";
+
+/**
+ * Categorías de nivel en el WordPress del CGE.
+ * El nivel se infiere de la categoría del post, no de la URL.
+ */
+const LEVEL_CATEGORIES: Array<{ id: number; level: string }> = [
+  { id: 149, level: "Inicial" },
+  { id: 150, level: "Primaria" },
+  { id: 151, level: "Secundaria" },
+  { id: 152, level: "Superior" },
+  { id: 208, level: "Supervisor" },
+];
+
+/**
+ * Departamentos y keywords para detectar departamento a partir de la URL del post.
+ * Orden importa: gualeguaychu antes que gualeguay para evitar falsos positivos.
+ */
+const DEPARTMENT_CONFIGS: Array<{
+  slug: string;
+  name: string;
+  keywords: string[];
+}> = [
+  {
+    slug: "islas-del-ibicuy",
+    name: "Islas del Ibicuy",
+    keywords: ["ibicuy", "ceibas", "paranacito", "mazaruca", "giorgi", "islas-del-ibicuy", "nep-nina"],
+  },
+  {
+    slug: "gualeguaychu",
+    name: "Gualeguaychú",
+    keywords: ["gualeguaychu"],
+  },
+  {
+    slug: "gualeguay",
+    name: "Gualeguay",
+    keywords: ["gualeguay"],
+  },
+  {
+    slug: "uruguay",
+    name: "Uruguay",
+    keywords: ["concepcion-del-uruguay", "colonia-elias", "colonia-larroque", "dde-uruguay"],
+  },
+  {
+    slug: "victoria",
+    name: "Victoria",
+    keywords: ["victoria"],
+  },
+  {
+    slug: "villaguay",
+    name: "Villaguay",
+    keywords: ["villaguay"],
+  },
+];
+
+type WpPost = {
+  id: number;
+  date: string;
+  link: string;
+  title: { rendered: string };
+  content: { rendered: string };
+  categories: number[];
+};
+
+/** Convierte HTML a texto plano eliminando tags y normalizando espacios. */
+function htmlToText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/** Detecta el departamento a partir de keywords en la URL del post. */
+function detectDepartment(url: string): { slug: string; name: string } | null {
+  const lower = url.toLowerCase();
+  for (const dep of DEPARTMENT_CONFIGS) {
+    if (dep.keywords.some((kw) => lower.includes(kw))) {
+      return { slug: dep.slug, name: dep.name };
+    }
+  }
+  return null;
+}
+
+/** Detecta el nivel educativo a partir de las categorías del post. */
+function detectLevel(categories: number[]): string | null {
+  for (const cat of LEVEL_CATEGORIES) {
+    if (categories.includes(cat.id)) return cat.level;
+  }
+  return null;
+}
+
+/**
+ * Obtiene posts de la WordPress REST API del CGE para una categoría y mes dados.
+ * Pagina automáticamente hasta agotar los resultados.
+ */
+async function fetchPostsByCategory(
+  categoryId: number,
+  afterDate: string,
+  beforeDate: string,
+): Promise<WpPost[]> {
+  const posts: WpPost[] = [];
+  let page = 1;
+
+  while (true) {
+    try {
+      const { data } = await axios.get<WpPost[]>(WP_API, {
+        params: {
+          per_page: 100,
+          page,
+          after: afterDate,
+          before: beforeDate,
+          categories: categoryId,
+          orderby: "date",
+          order: "desc",
+          _fields: "id,date,link,title,content,categories",
+        },
+        timeout: 25_000,
+      });
+
+      if (!Array.isArray(data) || data.length === 0) break;
+      posts.push(...data);
+      if (data.length < 100) break;
+      page++;
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      // WordPress devuelve 400 si el parámetro `page` excede el total de páginas
+      if (status === 400) break;
+      cgeScraperLogger.warn("CGE API scraper → error al paginar", {
+        categoryId,
+        page,
+        error: (err as Error)?.message ?? String(err),
+      });
+      break;
+    }
+  }
+
+  return posts;
+}
+
+export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+
+  const afterDate = `${year}-${month}-01T00:00:00`;
+  // Primer día del mes siguiente como límite superior
+  const nextMonthNum = now.getMonth() + 2;
+  const nextYear = nextMonthNum > 12 ? year + 1 : year;
+  const nextMonth = String(nextMonthNum > 12 ? 1 : nextMonthNum).padStart(2, "0");
+  const beforeDate = `${nextYear}-${nextMonth}-01T00:00:00`;
+
+  appLogger.info("Iniciando CGE API scraper", { afterDate, beforeDate });
+  cgeScraperLogger.info("CGE API scraper → inicio", { afterDate, beforeDate });
+
+  // Obtener URLs ya guardadas este mes para este source (evita re-procesar)
+  const startOfMonth = new Date(year, now.getMonth(), 1);
+  const existingContests = await prisma.contest.findMany({
+    where: { source_name: SOURCE_NAME, created_at: { gte: startOfMonth } },
+    select: { source_url: true },
+  });
+  const existingUrlSet = new Set(
+    existingContests
+      .map((c) => c.source_url)
+      .filter((u): u is string => !!u)
+      .map((u) => u.replace(/\/$/, "")),
+  );
+
+  // También considerar URLs ya guardadas por los scrapers anteriores (evita duplicados entre sources)
+  const existingAllSources = await prisma.contest.findMany({
+    where: {
+      created_at: { gte: startOfMonth },
+      source_url: { contains: `cge.entrerios.gov.ar/${year}/${month}/` },
+    },
+    select: { source_url: true },
+  });
+  for (const c of existingAllSources) {
+    if (c.source_url) existingUrlSet.add(c.source_url.replace(/\/$/, ""));
+  }
+
+  // Recolectar todos los posts del mes agrupados por nivel
+  const allPosts = new Map<string, WpPost>(); // key = URL normalizada
+
+  for (const levelCat of LEVEL_CATEGORIES) {
+    cgeScraperLogger.info("CGE API scraper → fetching categoría", {
+      categoryId: levelCat.id,
+      level: levelCat.level,
+    });
+
+    const posts = await fetchPostsByCategory(levelCat.id, afterDate, beforeDate);
+
+    cgeScraperLogger.info("CGE API scraper → posts obtenidos", {
+      categoryId: levelCat.id,
+      level: levelCat.level,
+      count: posts.length,
+    });
+
+    for (const post of posts) {
+      const normalized = (post.link ?? "").replace(/\/$/, "");
+      if (!normalized || allPosts.has(normalized)) continue;
+
+      // Solo nos interesan posts de los departamentos configurados
+      const dep = detectDepartment(normalized);
+      if (!dep) continue;
+
+      allPosts.set(normalized, post);
+    }
+
+    // Pausa entre categorías para no saturar la API
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  cgeScraperLogger.info("CGE API scraper → posts relevantes encontrados", {
+    total: allPosts.size,
+  });
+
+  let created = 0;
+
+  for (const [normalizedUrl, post] of allPosts.entries()) {
+    if (existingUrlSet.has(normalizedUrl)) {
+      cgeScraperLogger.info("CGE API scraper → ya existe, se omite", { url: normalizedUrl });
+      continue;
+    }
+
+    const dep = detectDepartment(normalizedUrl)!;
+    const levelFromCat = detectLevel(post.categories);
+
+    const titleText = htmlToText(post.title?.rendered ?? "");
+    const contentText = htmlToText(post.content?.rendered ?? "");
+    const fullText = [titleText, contentText].filter(Boolean).join("\n\n");
+
+    cgeScraperLogger.info("CGE API scraper → procesando post", {
+      url: normalizedUrl,
+      department: dep.name,
+      level: levelFromCat,
+      titlePreview: titleText.slice(0, 80),
+    });
+
+    // Parsear campos del concurso desde el texto
+    const publishedAt = post.date ? new Date(post.date) : new Date();
+    const regexFields = extractContestFieldsFromText({
+      title: titleText,
+      description: fullText,
+      fallbackPublicationDate: publishedAt,
+      fallbackLevel: levelFromCat ?? undefined,
+    });
+
+    // Enriquecer con AI para mejor extracción de materia, turno, horas, etc.
+    const structured = await enrichContestFieldsWithAI(regexFields, fullText);
+
+    const publicationDate = structured.publicationDate ?? publishedAt;
+    const contestDate = structured.contestDate ?? publicationDate;
+    const subjectName = (structured.subjectName ?? "General").slice(0, 255);
+
+    // Resolver o crear departamento
+    const canonicalName = dep.name;
+    let department = await prisma.department.findFirst({
+      where: { OR: [{ slug: dep.slug }, { name: canonicalName }] },
+    });
+    if (!department) {
+      department = await prisma.department.create({
+        data: { name: canonicalName, slug: dep.slug },
+      });
+    }
+
+    // Resolver o crear escuela placeholder para el departamento
+    const schoolName = `CGE ${canonicalName}`;
+    let school = await prisma.school.findFirst({
+      where: { name: schoolName, department_id: department.id },
+    });
+    if (!school) {
+      school = await prisma.school.create({
+        data: {
+          name: schoolName,
+          city: canonicalName,
+          department: canonicalName,
+          department_id: department.id,
+        },
+      });
+    }
+
+    // Resolver o crear materia
+    let subject = await prisma.subject.findFirst({ where: { name: subjectName } });
+    if (!subject) {
+      subject = await prisma.subject.create({ data: { name: subjectName } });
+    }
+
+    await prisma.contest.create({
+      data: {
+        title: titleText.slice(0, 500),
+        description: fullText,
+        date: contestDate,
+        publication_date: publicationDate,
+        level: structured.level ?? levelFromCat ?? null,
+        shift: structured.shift ?? null,
+        schedule: structured.schedule ?? null,
+        hours_to_cover: structured.hoursToCover ?? null,
+        school_id: school.id,
+        subject_id: subject.id,
+        source_url: normalizedUrl,
+        source_name: SOURCE_NAME,
+        is_active: true,
+        is_processed: true,
+      },
+    });
+
+    existingUrlSet.add(normalizedUrl);
+    created++;
+
+    cgeScraperLogger.info("CGE API scraper → concurso creado", {
+      url: normalizedUrl,
+      department: dep.name,
+      level: structured.level ?? levelFromCat,
+      subject: subjectName,
+    });
+
+    // Pausa breve entre guardados para no saturar la DB ni la AI
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
+  appLogger.info("CGE API scraper finalizado", { created });
+  cgeScraperLogger.info("CGE API scraper → finalizado", { created });
+  return created;
+}
