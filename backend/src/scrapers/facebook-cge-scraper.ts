@@ -583,12 +583,25 @@ async function enrichPostFromDetails(
       // networkidle suele fallar por timeout detrás de Tor; domcontentloaded es más estable.
       await detailPage.goto(url, { waitUntil: "domcontentloaded", timeout: ENRICH_GOTO_TIMEOUT_MS });
       if (isCgeHostUrl(url)) {
-        // El cuerpo de la nota a veces llega después del HTML inicial (AJAX / fuentes).
-        await detailPage
-          .waitForSelector(".texto p, .texto, .entry-content, article .entry-content", {
-            timeout: 25_000,
-          })
-          .catch(() => undefined);
+        // Verificación rápida: CGE responde HTTP 200 con "La página solicitada está en construcción"
+        // cuando la URL no existe. Si ya aparece ese texto tras domcontentloaded, no esperamos más.
+        const quickText = await detailPage
+          .evaluate(() => (document.body?.innerText ?? "").slice(0, 400))
+          .catch(() => "");
+        const isQuickJunk =
+          /p[aá]gina solicitada est[aá] en construcci[oó]n/i.test(quickText) ||
+          /p[aá]gina no encontrada/i.test(quickText) ||
+          /error 404/i.test(quickText) ||
+          (/gobierno de entre r[ií]os/i.test(quickText) && quickText.trim().length < 200);
+
+        if (!isQuickJunk) {
+          // El contenido real de la nota puede llegar levemente después (fuentes/AJAX).
+          await detailPage
+            .waitForSelector(".texto p, .texto, .entry-content, article .entry-content", {
+              timeout: 12_000,
+            })
+            .catch(() => undefined);
+        }
       }
       const { text, cgeUrl } = await extractPostDetailFromPage(detailPage);
       const prev = (post.text ?? "").trim();
@@ -766,7 +779,9 @@ async function probeSlugBaseSequentially(
   isJunkContent: (text: string) => boolean,
 ): Promise<FacebookPost[]> {
   const MAX_PROBES = 30;
-  const MAX_CONSECUTIVE_NOT_FOUND = 2;
+  // WordPress asigna sufijos numéricos de forma consecutiva: si N no existe, N+1 tampoco.
+  // Paramos inmediatamente en el primer "en construcción" para no perder tiempo.
+  const MAX_CONSECUTIVE_NOT_FOUND = 1;
 
   const found: FacebookPost[] = [];
   let consecutiveNotFound = 0;
