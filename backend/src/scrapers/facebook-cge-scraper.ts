@@ -81,6 +81,11 @@ interface FacebookPost {
   createdAt?: Date;
   /** Último link a CGE encontrado dentro del post (si existe). */
   cgeUrl?: string;
+  /**
+   * true cuando el post fue generado por DB-seed (extrapolación desde URLs ya conocidas).
+   * Estos candidatos solo se guardan si el enriquecimiento confirma que la URL existe en CGE.
+   */
+  dbSeedCandidate?: boolean;
 }
 
 /** Solo `https://cge.entrerios.gov.ar/AAAA/MM/...` con año y mes actuales (reloj del servidor). */
@@ -649,6 +654,208 @@ async function enrichPostFromDetails(
   return post;
 }
 
+/**
+ * Genera candidatos de URL para el mes actual usando las URLs ya conocidas en la base de datos
+ * del departamento. Para cada patrón de slug con sufijo numérico encontrado en meses anteriores,
+ * genera los siguientes N números en el mes actual.
+ *
+ * Esto captura posts como /2026/04/convocatoria-...-n2-...-205 cuando Facebook no incrusta la
+ * URL completa en su HTML (el l.php solo apunta al dominio raíz).
+ *
+ * La validación real ocurre en el paso de enriquecimiento: si la URL no existe en CGE, WordPress
+ * redirige al home y `p.cgeUrl` queda como el dominio raíz, lo que hace fallar
+ * `isCgeUrlCurrentYearMonth` y el candidato se descarta automáticamente.
+ */
+async function generateDbSeedCandidates(
+  prisma: PrismaClient,
+  departmentId: number,
+  filterYm: string, // "YYYY/MM"
+): Promise<FacebookPost[]> {
+  const [filterYStr, filterMStr] = filterYm.split("/");
+  const filterY = Number(filterYStr);
+
+  // Obtener las URLs de concursos recientes del departamento (últimos 120 días).
+  const recentContests = await prisma.contest.findMany({
+    where: {
+      school: { department_id: departmentId },
+      source_url: { contains: "cge.entrerios.gov.ar" },
+    },
+    select: { source_url: true },
+    orderBy: { created_at: "desc" },
+    take: 300,
+  });
+
+  // Agrupar por base de slug (sin el sufijo numérico final), registrando el número máximo visto.
+  const slugMaxByBase = new Map<string, { basePath: string; maxNum: number; yearMonth: string }>();
+  for (const { source_url } of recentContests) {
+    if (!source_url) continue;
+    try {
+      const rawNorm = source_url.split("?")[0].split("#")[0].replace(/\/$/, "");
+      const u = new URL(rawNorm);
+      if (!u.hostname.toLowerCase().includes("cge.entrerios.gov.ar")) continue;
+      const pth = u.pathname.toLowerCase().replace(/\/+$/, "");
+      const ymMatch = pth.match(/^\/(\d{4}\/\d{2})\//);
+      if (!ymMatch) continue;
+      const urlYm = ymMatch[1]; // e.g. "2026/03"
+      const pnm = pth.match(/^(.*)-(\d{1,4})$/);
+      if (!pnm) continue;
+      // Para URLs del mes anterior: transformamos la base al mes actual antes de guardarla.
+      // Para URLs del mes actual: las usamos directamente como semilla (el FB no siempre captura todos los posts).
+      let basePath = pnm[1]; // e.g. "/2026/03/convocatoria-...-n2-islas..."
+      if (urlYm !== filterYm) {
+        // Cross-month: transformar /YYYY/MM/ al mes actual para generar candidatos del mes en curso.
+        const slugOnly = basePath.replace(/^\/\d{4}\/\d{2}\//, "");
+        basePath = `/${filterY}/${filterMStr}/${slugOnly}`;
+      }
+      const num = parseInt(pnm[2], 10);
+      if (num < 1 || num > 9999) continue;
+      const existing = slugMaxByBase.get(basePath);
+      if (!existing || num > existing.maxNum) {
+        slugMaxByBase.set(basePath, { basePath, maxNum: num, yearMonth: urlYm });
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const candidates: FacebookPost[] = [];
+  const PROBE_RANGE = 15; // Número de candidatos a generar por encima del último visto.
+
+  for (const { basePath, maxNum } of slugMaxByBase.values()) {
+    // basePath ya está normalizado al mes actual (cross-month o mismo mes).
+    const currentMonthBase = basePath;
+
+    for (let i = maxNum + 1; i <= maxNum + PROBE_RANGE; i++) {
+      const candidateUrl = `https://cge.entrerios.gov.ar${currentMonthBase}-${i}`;
+      candidates.push({
+        pageUrl: "https://cge.entrerios.gov.ar/",
+        postUrl: candidateUrl,
+        text: "",
+        cgeUrl: candidateUrl,
+        dbSeedCandidate: true,
+      });
+    }
+  }
+
+  if (candidates.length > 0) {
+    facebookScraperLogger.info("Facebook scraper → candidatos DB-seed generados", {
+      count: candidates.length,
+      filterYm,
+      slugBasesCount: slugMaxByBase.size,
+      sampleUrls: candidates.slice(0, 5).map((c) => c.postUrl),
+    });
+  }
+
+  return candidates;
+}
+
+/**
+ * Sondea secuencialmente las URLs de CGE para un slug base dado, comenzando desde startNum.
+ * Detiene cuando encuentra MAX_CONSECUTIVE_NOT_FOUND URLs inexistentes seguidas.
+ * Retorna los posts válidos encontrados (con texto enriquecido desde CGE).
+ *
+ * Esto actúa como backup robusto: WordPress numera slugs consecutivamente, así que
+ * si -207 y -208 existen pero -209 no, detenemos en -209 (o al segundo fallo).
+ */
+async function probeSlugBaseSequentially(
+  browser: Browser,
+  facebookContextUsesTor: boolean,
+  slugBaseUrl: string, // e.g. "https://cge.entrerios.gov.ar/2026/04/convocatoria-...-n2-..."
+  startNum: number,
+  existingUrlSet: Set<string>,
+  isJunkContent: (text: string) => boolean,
+): Promise<FacebookPost[]> {
+  const MAX_PROBES = 30;
+  const MAX_CONSECUTIVE_NOT_FOUND = 2;
+
+  const found: FacebookPost[] = [];
+  let consecutiveNotFound = 0;
+
+  for (let i = startNum; i < startNum + MAX_PROBES; i++) {
+    const url = `${slugBaseUrl}-${i}`;
+    const normalized = url.replace(/\/$/, "");
+
+    if (existingUrlSet.has(normalized)) {
+      // Ya guardado previamente; no interrumpir la secuencia
+      consecutiveNotFound = 0;
+      continue;
+    }
+
+    const candidate: FacebookPost = {
+      pageUrl: "https://cge.entrerios.gov.ar/",
+      postUrl: normalized,
+      text: "",
+      cgeUrl: normalized,
+      dbSeedCandidate: true,
+    };
+
+    facebookScraperLogger.debug("Facebook scraper → sondeo secuencial CGE", { url: normalized, num: i });
+    await enrichPostFromDetails(browser, candidate, facebookContextUsesTor);
+    await new Promise((r) => setTimeout(r, 800 + Math.random() * 700));
+
+    const isEmpty = !candidate.text.trim();
+    const isJunk = isEmpty || isJunkContent(candidate.text);
+
+    if (isJunk) {
+      consecutiveNotFound++;
+      facebookScraperLogger.debug("Facebook scraper → sondeo secuencial: URL no encontrada", {
+        url: normalized,
+        consecutiveNotFound,
+      });
+      if (consecutiveNotFound >= MAX_CONSECUTIVE_NOT_FOUND) break;
+    } else {
+      consecutiveNotFound = 0;
+      existingUrlSet.add(normalized);
+      found.push(candidate);
+      facebookScraperLogger.info("Facebook scraper → sondeo secuencial: nueva URL encontrada", {
+        url: normalized,
+        textPreview: candidate.text.slice(0, 80),
+      });
+    }
+  }
+
+  return found;
+}
+
+/**
+ * Construye el mapa de {slugBase → maxNum} a partir de las URLs del mes actual en la DB
+ * para el departamento dado. Usado por el sondeo secuencial como punto de inicio.
+ */
+async function buildCurrentMonthSlugBases(
+  prisma: PrismaClient,
+  departmentId: number,
+  filterYm: string,
+): Promise<Map<string, number>> {
+  const contests = await prisma.contest.findMany({
+    where: {
+      school: { department_id: departmentId },
+      source_url: { contains: `cge.entrerios.gov.ar/${filterYm}/` },
+    },
+    select: { source_url: true },
+  });
+
+  const slugMaxMap = new Map<string, number>();
+  for (const { source_url } of contests) {
+    if (!source_url) continue;
+    try {
+      const raw = source_url.split("?")[0].split("#")[0].replace(/\/$/, "");
+      const u = new URL(raw);
+      const pth = u.pathname.toLowerCase().replace(/\/+$/, "");
+      const m = pth.match(/^(.*)-(\d{1,4})$/);
+      if (!m) continue;
+      const num = parseInt(m[2], 10);
+      if (num < 1 || num > 9999) continue;
+      // Reconstruir la URL base completa con el host original
+      const base = `https://cge.entrerios.gov.ar${m[1]}`;
+      const existing = slugMaxMap.get(base);
+      if (!existing || num > existing) slugMaxMap.set(base, num);
+    } catch {
+      /* ignore */
+    }
+  }
+  return slugMaxMap;
+}
+
 export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<number> {
   const filterYm = `${new Date().getFullYear()}/${String(new Date().getMonth() + 1).padStart(2, "0")}`;
   const pagesLog = FACEBOOK_PAGES.map((p) => ({
@@ -685,14 +892,22 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
    */
   const slugBase = (url: string) => url.replace(/-\d+$/, "");
 
-  /** Detecta respuestas de error del CGE (página en construcción, etc.) */
+  /** Detecta respuestas de error del CGE (CGE devuelve HTTP 200 con contenido de error cuando una página no existe). */
   const isJunkContent = (text: string): boolean => {
     const t = text.toLowerCase();
     return (
+      // Página en construcción (respuesta típica de WordPress del CGE para URLs inexistentes)
       t.includes("página solicitada está en construcción") ||
       t.includes("pagina solicitada esta en construccion") ||
       t.includes("en construcción\n\ngobierno de entre") ||
-      (t.includes("gobierno de entre ríos") && t.length < 120)
+      // WordPress 404 estándar
+      t.includes("página no encontrada") ||
+      t.includes("pagina no encontrada") ||
+      t.includes("not found") ||
+      t.includes("error 404") ||
+      // Texto genérico del sitio sin contenido útil
+      (t.includes("gobierno de entre ríos") && t.length < 150) ||
+      (t.includes("gobierno de entre rios") && t.length < 150)
     );
   };
 
@@ -744,6 +959,34 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
         sampleUrls: posts.slice(0, 5).map((p) => p.postUrl),
       });
 
+      // Resolver el departamento temprano para poder usarlo en la generación de candidatos DB-seed.
+      let department = await prisma.department.findFirst({
+        where: {
+          OR: [{ slug: fbPage.departmentSlug }, { name: fbPage.departmentName }],
+        },
+      });
+      if (!department) {
+        department = await prisma.department.create({
+          data: { name: fbPage.departmentName, slug: fbPage.departmentSlug },
+        });
+        facebookScraperLogger.info("Facebook scraper → departamento creado para el feed", {
+          name: fbPage.departmentName,
+          slug: fbPage.departmentSlug,
+        });
+      }
+
+      // Agregar candidatos generados desde URLs ya conocidas en la BD (cross-month seed).
+      // Captura posts cuya URL completa no aparece en el HTML de Facebook (solo el dominio raíz).
+      const seedCandidates = await generateDbSeedCandidates(prisma, department.id, filterYm);
+      const postsUrlSet = new Set(posts.map((p) => normalizeCgeUrl(p.cgeUrl ?? p.postUrl)));
+      for (const sc of seedCandidates) {
+        const norm = normalizeCgeUrl(sc.postUrl);
+        if (!postsUrlSet.has(norm)) {
+          postsUrlSet.add(norm);
+          posts.push(sc);
+        }
+      }
+
       // Antes de visitar los detalles, consultamos la base para ver cuáles posts/URLs
       // ya generaron concursos, y así evitar abrir de nuevo esas páginas.
       const existingFromFacebook = await prisma.contest.findMany({
@@ -792,22 +1035,6 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
       const defaultDate = new Date();
       defaultDate.setMonth(defaultDate.getMonth() + 1);
 
-      // Mismo departamento que la DDE del feed (p. ej. Islas del Ibicuy), no provincia genérica.
-      let department = await prisma.department.findFirst({
-        where: {
-          OR: [{ slug: fbPage.departmentSlug }, { name: fbPage.departmentName }],
-        },
-      });
-      if (!department) {
-        department = await prisma.department.create({
-          data: { name: fbPage.departmentName, slug: fbPage.departmentSlug },
-        });
-        facebookScraperLogger.info("Facebook scraper → departamento creado para el feed", {
-          name: fbPage.departmentName,
-          slug: fbPage.departmentSlug,
-        });
-      }
-
       // El nombre de la escuela no es relevante; lo importante es que `department_id`
       // coincida con el scraper de CGE (Islas del Ibicuy).
       const schoolName = "Facebook CGE";
@@ -840,8 +1067,9 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
           });
         }
       }
-      // Extendemos el set de URLs existentes con los slug base para detectar duplicados numerados
-      const existingSlugBaseSet = new Set(Array.from(existingUrlSet).map(slugBase));
+      // El slug-base solo se usa para deduplicar dentro del run actual (no contra historia de la DB).
+      // Usar slug-base contra la DB descartaría concursos nuevos del mismo colegio (ej: -215 bloqueado por -214).
+      const existingSlugBaseSet = new Set<string>();
 
       for (const p of posts) {
         // Si dentro del post hay un link al CGE, lo usamos como URL principal
@@ -857,6 +1085,16 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
         }
         if (existingUrlSet.has(sourceUrl) || existingSlugBaseSet.has(slugBase(sourceUrl))) {
           facebookScraperLogger.info("Facebook scraper → concurso ya existente, se omite", {
+            sourceUrl,
+          });
+          continue;
+        }
+        // Candidatos DB-seed: descartar si el enriquecimiento no confirmó que la URL existe.
+        // Si la URL no existe en CGE, WordPress redirige al home y `sourceUrl` queda como root
+        // (ya filtrado arriba por `isCgeUrlCurrentYearMonth`). Si el enriquecimiento falló del
+        // todo, `text` queda vacío y no sabemos si la página existe → omitir por seguridad.
+        if (p.dbSeedCandidate && !p.text.trim()) {
+          facebookScraperLogger.debug("Facebook scraper → candidato DB-seed sin texto, se omite", {
             sourceUrl,
           });
           continue;
@@ -910,6 +1148,73 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
         existingSlugBaseSet.add(slugBase(sourceUrl));
         created++;
       }
+
+      // ── Fase de sondeo secuencial ──────────────────────────────────────────────
+      // Para cada slug base del mes actual con sufijo numérico (ej: .../ceibas-117),
+      // sondeamos N+1, N+2, … hasta encontrar dos URLs inexistentes consecutivas.
+      // Esto actúa como backup robusto: captura concursos que Facebook no muestra
+      // como link completo y que el gap-fill fijo podría no alcanzar.
+      const currentMonthBases = await buildCurrentMonthSlugBases(prisma, department.id, filterYm);
+      facebookScraperLogger.info("Facebook scraper → inicio sondeo secuencial", {
+        slugBasesCount: currentMonthBases.size,
+        bases: Array.from(currentMonthBases.entries()).map(([b, n]) => `${b.split("/").pop()}-${n}`),
+      });
+
+      for (const [slugBaseUrl, maxNum] of currentMonthBases.entries()) {
+        const seqPosts = await probeSlugBaseSequentially(
+          browser,
+          facebookContextUsesTor,
+          slugBaseUrl,
+          maxNum + 1,
+          existingUrlSet,
+          isJunkContent,
+        );
+
+        for (const p of seqPosts) {
+          const sourceUrl = normalizeCgeUrl(p.cgeUrl ?? p.postUrl);
+          if (existingSlugBaseSet.has(slugBase(sourceUrl))) continue;
+
+          facebookScraperLogger.info("Facebook scraper → creando concurso (sondeo secuencial)", {
+            sourceUrl,
+            titlePreview: p.text.slice(0, 120),
+          });
+
+          const parsed = extractContestFieldsFromText({
+            title: p.text.slice(0, 200),
+            description: p.text,
+            fallbackContestDate: defaultDate,
+            fallbackPublicationDate: defaultDate,
+          });
+          const subjectName = (parsed.subjectName ?? "General").slice(0, 255);
+          let subject = await prisma.subject.findFirst({ where: { name: subjectName } });
+          if (!subject) {
+            subject = await prisma.subject.create({ data: { name: subjectName } });
+          }
+
+          await prisma.contest.create({
+            data: {
+              title: p.text.slice(0, 200),
+              description: p.text,
+              date: parsed.contestDate ?? defaultDate,
+              publication_date: parsed.publicationDate ?? defaultDate,
+              level: parsed.level ?? null,
+              shift: parsed.shift ?? null,
+              schedule: parsed.schedule ?? null,
+              hours_to_cover: parsed.hoursToCover ?? null,
+              school_id: school.id,
+              subject_id: subject.id,
+              source_url: sourceUrl,
+              source_name: SOURCE_NAME,
+              is_active: true,
+            },
+          });
+
+          existingUrlSet.add(sourceUrl);
+          existingSlugBaseSet.add(slugBase(sourceUrl));
+          created++;
+        }
+      }
+      // ── Fin sondeo secuencial ───────────────────────────────────────────────────
 
       await page.close();
       await new Promise((r) => setTimeout(r, 3000 + Math.random() * 3000));
