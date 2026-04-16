@@ -57,7 +57,7 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
   });
 
   if (!alerts.length) {
-    appLogger.info("AlertAuto → no hay alertas activas, no se envía nada");
+    alertsApiLogger.info("AlertAuto → no hay alertas activas, no se envía nada");
     return { alerts_processed: 0, notifications_created: 0, reason: "no_active_alerts" as const };
   }
 

@@ -72,4 +72,4 @@ echo "Manteniendo la Mac despierta con caffeinate (Ctrl+C para salir)..."
 echo ""
 
 # Evita que la Mac se duerma mientras los servidores estan corriendo
-caffeinate -i
+caffeinate -i -s -d

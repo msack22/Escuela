@@ -197,7 +197,14 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
   // Recolectar todos los posts del mes agrupados por nivel
   const allPosts = new Map<string, WpPost>(); // key = URL normalizada
 
+  const LEVELS_SKIP = new Set(["Primaria", "Inicial"]);
+
   for (const levelCat of LEVEL_CATEGORIES) {
+    if (LEVELS_SKIP.has(levelCat.level)) {
+      cgeScraperLogger.info("CGE API scraper → nivel excluido, se omite", { level: levelCat.level });
+      continue;
+    }
+
     cgeScraperLogger.info("CGE API scraper → fetching categoría", {
       categoryId: levelCat.id,
       level: levelCat.level,

@@ -6,6 +6,8 @@ const SOURCES_CAPACITACIONES_ONLY = new Set([
   "Puntos Digitales",
 ]);
 
+const LEVELS_EXCLUDED_BY_DEFAULT = ["Primaria", "Inicial"];
+
 function normalizePlaceName(value: string): string {
   const trimmed = value.trim().replace(/\s+/g, " ");
   if (!trimmed) return trimmed;
@@ -54,7 +56,11 @@ export const contestSearchService = {
     } else {
       where.source_name = { notIn: Array.from(SOURCES_CAPACITACIONES_ONLY) };
     }
-    if (filters.level) where.level = filters.level;
+    if (filters.level) {
+      where.level = filters.level;
+    } else {
+      where.level = { notIn: LEVELS_EXCLUDED_BY_DEFAULT };
+    }
     if (filters.shift) where.shift = filters.shift;
     if (filters.contractType) where.contract_type = filters.contractType;
     if (filters.dateFrom || filters.dateTo) {
