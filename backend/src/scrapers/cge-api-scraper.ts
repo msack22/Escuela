@@ -111,7 +111,7 @@ function detectLevel(categories: number[]): string | null {
  * Pagina automáticamente hasta agotar los resultados.
  */
 async function fetchPostsByCategory(
-  categoryId: number,
+  categoryId: number | null,
   afterDate: string,
   beforeDate: string,
 ): Promise<WpPost[]> {
@@ -120,19 +120,18 @@ async function fetchPostsByCategory(
 
   while (true) {
     try {
-      const { data } = await axios.get<WpPost[]>(WP_API, {
-        params: {
-          per_page: 100,
-          page,
-          after: afterDate,
-          before: beforeDate,
-          categories: categoryId,
-          orderby: "date",
-          order: "desc",
-          _fields: "id,date,link,title,content,categories",
-        },
-        timeout: 25_000,
-      });
+      const params: Record<string, unknown> = {
+        per_page: 100,
+        page,
+        after: afterDate,
+        before: beforeDate,
+        orderby: "date",
+        order: "desc",
+        _fields: "id,date,link,title,content,categories",
+      };
+      if (categoryId !== null) params.categories = categoryId;
+
+      const { data } = await axios.get<WpPost[]>(WP_API, { params, timeout: 25_000 });
 
       if (!Array.isArray(data) || data.length === 0) break;
       posts.push(...data);
@@ -248,6 +247,28 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
 
     // Pausa entre categorías para no saturar la API
     await new Promise((r) => setTimeout(r, 500));
+  }
+
+  // Pase extra sin filtro de categoría: captura posts publicados bajo categorías
+  // departamentales u otras que no estén en LEVEL_CATEGORIES (ej. DDE Islas del Ibicuy).
+  // La deduplicación por URL evita re-procesar los ya encontrados.
+  cgeScraperLogger.info("CGE API scraper → pase extra sin categoría (catch-all departamental)");
+  try {
+    const extraPosts = await fetchPostsByCategory(null, afterDate, beforeDate);
+    apiSuccessCount++;
+    for (const post of extraPosts) {
+      const normalized = (post.link ?? "").replace(/\/$/, "");
+      if (!normalized || allPosts.has(normalized)) continue;
+      const dep = detectDepartment(normalized);
+      if (!dep) continue;
+      allPosts.set(normalized, post);
+    }
+    cgeScraperLogger.info("CGE API scraper → pase extra finalizado", { extra: extraPosts.length });
+  } catch (err) {
+    apiErrorCount++;
+    cgeScraperLogger.warn("CGE API scraper → error en pase extra", {
+      error: (err as Error)?.message ?? String(err),
+    });
   }
 
   // Si todas las categorías fallaron, la API está caída — lanzamos para activar fallback
