@@ -131,7 +131,14 @@ async function fetchPostsByCategory(
       };
       if (categoryId !== null) params.categories = categoryId;
 
-      const { data } = await axios.get<WpPost[]>(WP_API, { params, timeout: 25_000 });
+      const { data } = await axios.get<WpPost[]>(WP_API, {
+        params,
+        timeout: 25_000,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; EscuelaCGEScraper/1.0)",
+          "Accept": "application/json",
+        },
+      });
 
       if (!Array.isArray(data) || data.length === 0) break;
       posts.push(...data);
@@ -249,12 +256,13 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
     await new Promise((r) => setTimeout(r, 500));
   }
 
-  // Pase extra sin filtro de categoría: captura posts publicados bajo categorías
-  // departamentales u otras que no estén en LEVEL_CATEGORIES (ej. DDE Islas del Ibicuy).
+  // Pase extra por categoría 68 "Concursos" (catch-all): captura posts que solo tienen
+  // la categoría general sin nivel específico (ej. DDE Islas del Ibicuy sin categoría de nivel).
   // La deduplicación por URL evita re-procesar los ya encontrados.
-  cgeScraperLogger.info("CGE API scraper → pase extra sin categoría (catch-all departamental)");
+  const CONCURSOS_CATEGORY_ID = 68;
+  cgeScraperLogger.info("CGE API scraper → pase extra categoría Concursos (catch-all)", { categoryId: CONCURSOS_CATEGORY_ID });
   try {
-    const extraPosts = await fetchPostsByCategory(null, afterDate, beforeDate);
+    const extraPosts = await fetchPostsByCategory(CONCURSOS_CATEGORY_ID, afterDate, beforeDate);
     apiSuccessCount++;
     for (const post of extraPosts) {
       const normalized = (post.link ?? "").replace(/\/$/, "");
