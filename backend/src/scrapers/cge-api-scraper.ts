@@ -321,7 +321,9 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
     // Enriquecer con AI para mejor extracción de materia, turno, horas, etc.
     const structured = await enrichContestFieldsWithAI(regexFields, fullText);
 
-    const publicationDate = structured.publicationDate ?? publishedAt;
+    // publication_date: siempre la fecha real del post en la API de WordPress
+    const publicationDate = publishedAt;
+    // contest_date: fecha del concurso extraída del contenido del post; si no se encuentra, usamos publication_date como fallback
     const contestDate = structured.contestDate ?? publicationDate;
     const subjectName = (normalizeSubjectName(structured.subjectName) ?? structured.subjectName ?? "General").slice(0, 255);
 
