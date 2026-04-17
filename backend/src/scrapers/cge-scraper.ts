@@ -26,7 +26,6 @@ const DEPARTAMENTAL_PAGES: Array<{ slug: string; department: string }> = [
   { slug: "islas-del-ibicuy", department: "islas del ibicuy" },
   { slug: "uruguay", department: "uruguay" },
   { slug: "victoria", department: "victoria" },
-  { slug: "villaguay", department: "villaguay" },
 ];
 
 const LEVEL_SECTIONS: Array<{ id: string; level: string }> = [

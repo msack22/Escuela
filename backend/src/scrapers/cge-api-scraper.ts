@@ -55,11 +55,6 @@ const DEPARTMENT_CONFIGS: Array<{
     name: "Victoria",
     keywords: ["victoria"],
   },
-  {
-    slug: "villaguay",
-    name: "Villaguay",
-    keywords: ["villaguay"],
-  },
 ];
 
 type WpPost = {
