@@ -116,6 +116,7 @@ docs/build/
 # Dependencies folder
 lib/
 libs/
+!backend/src/lib/
 
 # Temporary files
 tmp/

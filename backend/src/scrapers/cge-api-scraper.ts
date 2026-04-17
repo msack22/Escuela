@@ -5,6 +5,7 @@ import {
   extractContestFieldsFromText,
   enrichContestFieldsWithAI,
 } from "../services/contest-text-parser.js";
+import { normalizeSubjectName } from "../lib/subject-normalizer.js";
 
 const SOURCE_NAME = "CGE Entre Ríos API";
 const WP_API = "https://cge.entrerios.gov.ar/wp-json/wp/v2/posts";
@@ -322,7 +323,7 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
 
     const publicationDate = structured.publicationDate ?? publishedAt;
     const contestDate = structured.contestDate ?? publicationDate;
-    const subjectName = (structured.subjectName ?? "General").slice(0, 255);
+    const subjectName = (normalizeSubjectName(structured.subjectName) ?? structured.subjectName ?? "General").slice(0, 255);
 
     // Resolver o crear departamento
     const canonicalName = dep.name;
