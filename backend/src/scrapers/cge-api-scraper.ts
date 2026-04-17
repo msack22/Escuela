@@ -142,16 +142,19 @@ async function fetchPostsByCategory(
       const status = (err as { response?: { status?: number } })?.response?.status;
       // WordPress devuelve 400 si el parámetro `page` excede el total de páginas
       if (status === 400) break;
-      cgeScraperLogger.warn("CGE API scraper → error al paginar", {
-        categoryId,
-        page,
-        error: (err as Error)?.message ?? String(err),
-      });
-      break;
+      // Cualquier otro error (500, timeout, red) indica API no disponible
+      throw err;
     }
   }
 
   return posts;
+}
+
+export class CgeApiUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CgeApiUnavailableError";
+  }
 }
 
 export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
@@ -198,6 +201,8 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
   const allPosts = new Map<string, WpPost>(); // key = URL normalizada
 
   const LEVELS_SKIP = new Set(["Primaria", "Inicial"]);
+  let apiSuccessCount = 0;
+  let apiErrorCount = 0;
 
   for (const levelCat of LEVEL_CATEGORIES) {
     if (LEVELS_SKIP.has(levelCat.level)) {
@@ -210,7 +215,19 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
       level: levelCat.level,
     });
 
-    const posts = await fetchPostsByCategory(levelCat.id, afterDate, beforeDate);
+    let posts: WpPost[];
+    try {
+      posts = await fetchPostsByCategory(levelCat.id, afterDate, beforeDate);
+      apiSuccessCount++;
+    } catch (err) {
+      apiErrorCount++;
+      cgeScraperLogger.warn("CGE API scraper → error al obtener categoría", {
+        level: levelCat.level,
+        error: (err as Error)?.message ?? String(err),
+      });
+      await new Promise((r) => setTimeout(r, 500));
+      continue;
+    }
 
     cgeScraperLogger.info("CGE API scraper → posts obtenidos", {
       categoryId: levelCat.id,
@@ -233,8 +250,16 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
     await new Promise((r) => setTimeout(r, 500));
   }
 
+  // Si todas las categorías fallaron, la API está caída — lanzamos para activar fallback
+  if (apiSuccessCount === 0 && apiErrorCount > 0) {
+    cgeScraperLogger.warn("CGE API scraper → todas las categorías fallaron, API no disponible", { apiErrorCount });
+    throw new CgeApiUnavailableError("CGE WordPress API no disponible (todas las categorías devolvieron error)");
+  }
+
   cgeScraperLogger.info("CGE API scraper → posts relevantes encontrados", {
     total: allPosts.size,
+    apiSuccessCount,
+    apiErrorCount,
   });
 
   let created = 0;

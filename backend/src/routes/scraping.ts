@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import { runCgeScraper } from "../scrapers/cge-scraper.js";
 import { runFacebookCgeScraper } from "../scrapers/facebook-cge-scraper.js";
-import { runCgeApiScraper } from "../scrapers/cge-api-scraper.js";
+import { runCgeApiScraper, CgeApiUnavailableError } from "../scrapers/cge-api-scraper.js";
 import { schedulerService } from "../services/scheduler.service.js";
 import { sendAutomaticContestNotifications } from "../services/alert-auto.service.js";
 import { appLogger } from "../lib/logger.js";
@@ -18,16 +18,41 @@ export async function runScraperBySource(
     let total = 0;
 
     appLogger.info("Scraping → running CGE API scraper (all)");
-    const apiCount = await runCgeApiScraper(prisma);
-    total += apiCount;
+    try {
+      const apiCount = await runCgeApiScraper(prisma);
+      total += apiCount;
+      appLogger.info("Scraping → CGE API scraper finished", { apiCount });
+    } catch (err) {
+      if (err instanceof CgeApiUnavailableError) {
+        appLogger.warn("Scraping → CGE API no disponible, usando fallback HTML scraper", { error: err.message });
+        const fallbackCount = await runCgeScraper(prisma);
+        total += fallbackCount;
+        appLogger.info("Scraping → CGE HTML fallback finished", { fallbackCount });
+        const fbCount = await runFacebookCgeScraper(prisma);
+        total += fbCount;
+        appLogger.info("Scraping → Facebook fallback finished", { fbCount });
+      } else {
+        throw err;
+      }
+    }
 
-    appLogger.info("Scraping → all scrapers finished", { total, apiCount });
+    appLogger.info("Scraping → all scrapers finished", { total });
     return { count: total, success: true };
   }
 
   if (source === "cge_api") {
-    const count = await runCgeApiScraper(prisma);
-    return { count, success: true };
+    try {
+      const count = await runCgeApiScraper(prisma);
+      return { count, success: true };
+    } catch (err) {
+      if (err instanceof CgeApiUnavailableError) {
+        appLogger.warn("Scraping → CGE API no disponible, usando fallback HTML scraper", { error: err.message });
+        const fallbackCount = await runCgeScraper(prisma);
+        const fbCount = await runFacebookCgeScraper(prisma);
+        return { count: fallbackCount + fbCount, success: true };
+      }
+      throw err;
+    }
   }
 
   // Scrapers legacy — mantenidos como backup
