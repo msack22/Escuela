@@ -259,7 +259,9 @@ const SchedulerControl: React.FC = () => {
         <Table
           size="small"
           rowKey={(row) => row.started_at}
-          dataSource={schedulerHistory?.runs ?? []}
+          dataSource={[...(schedulerHistory?.runs ?? [])].sort(
+            (a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
+          )}
           columns={historyColumns}
           pagination={false}
         />
