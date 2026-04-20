@@ -48,7 +48,7 @@ export const usersRoutes: FastifyPluginAsync = async (app) => {
       data: {
         name: body.username ?? body.email,
         email: body.email.trim(),
-        phone_number: body.phone_number ?? null,
+        phone_number: body.phone_number?.replace(/\s/g, "") || null,
         is_active: body.is_active ?? true,
       },
     });
@@ -64,7 +64,7 @@ export const usersRoutes: FastifyPluginAsync = async (app) => {
       data: {
         ...(body.username != null && { name: body.username }),
         ...(body.email != null && { email: body.email }),
-        ...(body.phone_number != null && { phone_number: body.phone_number }),
+        ...(body.phone_number != null && { phone_number: body.phone_number.replace(/\s/g, "") || null }),
         ...(body.is_active != null && { is_active: body.is_active }),
       },
     });

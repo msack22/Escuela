@@ -169,8 +169,21 @@ const UserManagement: React.FC = () => {
           <Form.Item name="email" label="Email" rules={[{ required: true }]}>
             <Input type="email" placeholder="email@ejemplo.com" />
           </Form.Item>
-          <Form.Item name="phone_number" label="Teléfono">
-            <Input placeholder="+54 9 ..." />
+          <Form.Item
+            name="phone_number"
+            label="Teléfono"
+            rules={[{
+              validator: (_, value) => {
+                if (!value) return Promise.resolve();
+                const digits = value.replace(/\D/g, '');
+                if (digits.length < 8 || digits.length > 15) {
+                  return Promise.reject(new Error('Ingresá un número válido (ej: +54 9 3441 123456)'));
+                }
+                return Promise.resolve();
+              },
+            }]}
+          >
+            <Input placeholder="+54 9 3441 123456" />
           </Form.Item>
           <Form.Item name="is_active" label="Activo" valuePropName="checked">
             <Switch />
