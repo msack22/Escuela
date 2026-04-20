@@ -11,7 +11,7 @@ let ready = false;
 
 const DEFAULT_INIT_TIMEOUT_MS = 60_000;
 
-function initClient(timeoutMs: number = DEFAULT_INIT_TIMEOUT_MS): Promise<void> {
+async function initClient(timeoutMs: number = DEFAULT_INIT_TIMEOUT_MS): Promise<void> {
   alertsApiLogger.info("initClient WhatsApp Web llamado", { ready, initializing });
   if (ready) return Promise.resolve();
   if (initializing) {
@@ -30,6 +30,11 @@ function initClient(timeoutMs: number = DEFAULT_INIT_TIMEOUT_MS): Promise<void> 
     });
   }
   initializing = true;
+
+  if (client) {
+    try { await client.destroy(); } catch {}
+    client = null;
+  }
 
   client = new Client({
     authStrategy: new LocalAuth({ clientId: "escuela-backend" }),
@@ -153,6 +158,9 @@ export async function sendWhatsappMessage(toRaw: string, text: string): Promise<
       try {
         ready = false;
         initializing = false;
+        if (client) {
+          try { await client.destroy(); } catch {}
+        }
         client = null;
         await initClient();
         if (!client || !ready) {

@@ -114,6 +114,6 @@ export const schedulerRoutes: FastifyPluginAsync = async (app) => {
   // Historial de ejecuciones automáticas (solo scheduler en memoria).
   app.get<{ Querystring: { limit?: string } }>("/history", async (req) => {
     const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit ?? "20", 10) || 20));
-    return { runs: schedulerService.getHistory(limit) };
+    return { runs: await schedulerService.getHistory(limit) };
   });
 };

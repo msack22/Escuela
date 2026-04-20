@@ -138,6 +138,20 @@ model Department {
   @@map("departments")
 }
 
+model SchedulerRun {
+  id             Int      @id @default(autoincrement())
+  started_at     DateTime
+  finished_at    DateTime
+  timezone       String   @db.VarChar(50)
+  hour_ar        Int
+  sources        String   @db.VarChar(255)
+  total_contests Int      @default(0)
+  cge_count      Int      @default(0)
+  facebook_count Int      @default(0)
+
+  @@map("scheduler_runs")
+}
+
 model ScrapingLog {
   id                    Int      @id @default(autoincrement())
   source_name           String   @db.VarChar(255)

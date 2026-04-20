@@ -37,7 +37,6 @@ type SchedulerRunInfo = {
   facebookCount: number;
 };
 
-const schedulerHistory: SchedulerRunInfo[] = [];
 
 function getArgentinaLocalParts(d: Date): { dateKey: string; hour: number } {
   const fmt = new Intl.DateTimeFormat("en-CA", {
@@ -128,8 +127,21 @@ export const schedulerService = {
       autoSources = partial.auto_sources.filter((s) => AVAILABLE_SOURCES.includes(s));
     }
   },
-  getHistory(limit = 20) {
-    return schedulerHistory.slice(-limit);
+  async getHistory(limit = 20) {
+    const rows = await prisma.schedulerRun.findMany({
+      orderBy: { started_at: "desc" },
+      take: limit,
+    });
+    return rows.map((r) => ({
+      started_at: r.started_at.toISOString(),
+      finished_at: r.finished_at.toISOString(),
+      timezone: r.timezone,
+      hour_ar: r.hour_ar,
+      sources: r.sources.split(","),
+      total_contests: r.total_contests,
+      cgeCount: r.cge_count,
+      facebookCount: r.facebook_count,
+    }));
   },
 };
 
@@ -193,6 +205,18 @@ setInterval(async () => {
     nextRun = computeNextRun(startedAt);
 
     const finishedAt = new Date();
+    await prisma.schedulerRun.create({
+      data: {
+        started_at: startedAt,
+        finished_at: finishedAt,
+        timezone: TIMEZONE,
+        hour_ar: currentHourAr,
+        sources: autoSources.join(","),
+        total_contests: total,
+        cge_count: cgeCount,
+        facebook_count: fbCount,
+      },
+    });
     const runInfo: SchedulerRunInfo = {
       started_at: startedAt.toISOString(),
       finished_at: finishedAt.toISOString(),
@@ -203,7 +227,6 @@ setInterval(async () => {
       cgeCount,
       facebookCount: fbCount,
     };
-    schedulerHistory.push(runInfo);
 
     // Enviar notificaciones automáticas para concursos nuevos desde que empezó este ciclo.
     const notifSummary = await sendAutomaticContestNotifications(prisma, startedAt);

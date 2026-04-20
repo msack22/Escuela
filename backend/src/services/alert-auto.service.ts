@@ -193,32 +193,39 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
 
     let whatsappSent = false;
     if (whatsapp) {
-      try {
-        const lines = toNotify.map(
-          (c) =>
-            `• ${c.title}\n` +
-            `  Fecha concurso: ${formatDateTime(c.date)}\n` +
-            `  Horas: ${c.hours_to_cover ?? "—"}\n` +
-            `  Materia/Cargo: ${c.subject?.name ?? "—"}\n` +
-            `  ${c.source_url}`
-        );
-        const preview = `[Concursos] ${toNotify.length} nuevo(s) concurso(s) para tus filtros:\n\n${lines.join("\n\n")}${email ? `\n\nTambién enviamos el detalle a ${email}.` : ""}`;
-        whatsappSent = await sendWhatsappMessage(whatsapp, preview);
-        if (whatsappSent) {
-          alertsApiLogger.info("AlertAuto → WhatsApp sent for alert", { alertId: alert.id, whatsapp });
+      const lines = toNotify.map(
+        (c) =>
+          `• ${c.title}\n` +
+          `  Fecha concurso: ${formatDateTime(c.date)}\n` +
+          `  Horas: ${c.hours_to_cover ?? "—"}\n` +
+          `  Materia/Cargo: ${c.subject?.name ?? "—"}\n` +
+          `  ${c.source_url}`
+      );
+      const preview = `[Concursos] ${toNotify.length} nuevo(s) concurso(s) para tus filtros:\n\n${lines.join("\n\n")}${email ? `\n\nTambién enviamos el detalle a ${email}.` : ""}`;
+      const WA_MAX_ATTEMPTS = 3;
+      for (let attempt = 1; attempt <= WA_MAX_ATTEMPTS && !whatsappSent; attempt++) {
+        if (attempt > 1) await new Promise((r) => setTimeout(r, 5_000));
+        try {
+          whatsappSent = await sendWhatsappMessage(whatsapp, preview);
+          if (whatsappSent) {
+            alertsApiLogger.info("AlertAuto → WhatsApp sent for alert", { alertId: alert.id, whatsapp, attempt });
+          } else if (attempt < WA_MAX_ATTEMPTS) {
+            alertsApiLogger.warn("AlertAuto → WhatsApp falló, reintentando", { alertId: alert.id, attempt });
+          }
+        } catch (err) {
+          alertsApiLogger.error("AlertAuto → failed to send WhatsApp", {
+            alertId: alert.id,
+            whatsapp,
+            attempt,
+            error: (err as Error)?.message ?? String(err),
+          });
         }
-      } catch (err) {
-        alertsApiLogger.error("AlertAuto → failed to send WhatsApp", {
-          alertId: alert.id,
-          whatsapp,
-          error: (err as Error)?.message ?? String(err),
-        });
       }
     }
 
-    // Guardamos como "notificado" si se pudo notificar por AL MENOS un canal.
-    // Esto evita re-enviar el mismo lote por email si WhatsApp falla (o viceversa).
-    const sentAny = emailSent || whatsappSent;
+    // El email es el canal principal: si se envió el mail se marca como notificado.
+    // Si no hay email configurado, se usa WhatsApp como fallback.
+    const sentAny = email ? emailSent : whatsappSent;
 
     if (sentAny) {
       await db.contestNotificationSent.createMany({
