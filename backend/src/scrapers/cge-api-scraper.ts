@@ -276,9 +276,25 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
       const dep = detectDepartment(normalized);
       if (!dep) continue;
       if (isCatchAllPostSkipped(post)) {
+        const title = htmlToText(post.title?.rendered ?? "").toLowerCase();
+        const matched = SKIP_LEVEL_KEYWORDS.find((kw) => title.includes(kw));
         cgeScraperLogger.info("CGE API scraper → catch-all post descartado por nivel", {
           title: post.title?.rendered,
           url: normalized,
+          keyword: matched,
+        });
+        await prisma.discardedPost.createMany({
+          data: [{
+            source_name: SOURCE_NAME,
+            url: normalized,
+            title: post.title?.rendered ?? "",
+            reason: "level_keyword",
+            keyword_matched: matched ?? null,
+            post_date: post.date ? new Date(post.date) : null,
+          }],
+          skipDuplicates: true,
+        }).catch(() => {
+          // Si falla (ej. url muy larga) seguimos sin interrumpir el scraping
         });
         continue;
       }

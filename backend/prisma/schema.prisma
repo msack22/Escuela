@@ -152,6 +152,19 @@ model SchedulerRun {
   @@map("scheduler_runs")
 }
 
+model DiscardedPost {
+  id              Int      @id @default(autoincrement())
+  source_name     String   @db.VarChar(255)
+  url             String   @unique @db.VarChar(2048)
+  title           String   @db.VarChar(500)
+  reason          String   @db.VarChar(100)
+  keyword_matched String?  @db.VarChar(100)
+  post_date       DateTime?
+  discarded_at    DateTime @default(now())
+
+  @@map("discarded_posts")
+}
+
 model ScrapingLog {
   id                    Int      @id @default(autoincrement())
   source_name           String   @db.VarChar(255)
