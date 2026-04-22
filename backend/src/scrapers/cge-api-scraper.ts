@@ -252,6 +252,16 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
     await new Promise((r) => setTimeout(r, 500));
   }
 
+  // Palabras clave que identifican niveles que no nos interesan (Primaria / Inicial).
+  // Se aplican al título del post del catch-all, donde no hay categoría de nivel.
+  const SKIP_LEVEL_KEYWORDS = [
+    "primaria", "nivel primario", "nivel inicial", "inicial", "jardín", "jardin", "jardines",
+  ];
+  function isCatchAllPostSkipped(post: WpPost): boolean {
+    const title = htmlToText(post.title?.rendered ?? "").toLowerCase();
+    return SKIP_LEVEL_KEYWORDS.some((kw) => title.includes(kw));
+  }
+
   // Pase extra por categoría 68 "Concursos" (catch-all): captura posts que solo tienen
   // la categoría general sin nivel específico (ej. DDE Islas del Ibicuy sin categoría de nivel).
   // La deduplicación por URL evita re-procesar los ya encontrados.
@@ -265,6 +275,13 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
       if (!normalized || allPosts.has(normalized)) continue;
       const dep = detectDepartment(normalized);
       if (!dep) continue;
+      if (isCatchAllPostSkipped(post)) {
+        cgeScraperLogger.info("CGE API scraper → catch-all post descartado por nivel", {
+          title: post.title?.rendered,
+          url: normalized,
+        });
+        continue;
+      }
       allPosts.set(normalized, post);
     }
     cgeScraperLogger.info("CGE API scraper → pase extra finalizado", { extra: extraPosts.length });
