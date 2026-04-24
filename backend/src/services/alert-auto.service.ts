@@ -161,8 +161,8 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
     const subject = `[Concursos] ${toNotify.length} nuevo(s) concurso(s) para tus filtros`;
     const html = toNotify
       .map(
-        (c) =>
-          `<p><strong>${c.title}</strong><br/>` +
+        (c, i) =>
+          `<p><strong>${i + 1}. ${c.title}</strong><br/>` +
           `Fecha concurso: ${formatDateTime(c.date)}<br/>` +
           `Horas: ${c.hours_to_cover ?? "—"}<br/>` +
           `Materia/Cargo: ${c.subject?.name ?? "—"}<br/>` +
@@ -194,8 +194,8 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
     let whatsappSent = false;
     if (whatsapp) {
       const lines = toNotify.map(
-        (c) =>
-          `• ${c.title}\n` +
+        (c, i) =>
+          `${i + 1}. ${c.title}\n` +
           `  Fecha concurso: ${formatDateTime(c.date)}\n` +
           `  Horas: ${c.hours_to_cover ?? "—"}\n` +
           `  Materia/Cargo: ${c.subject?.name ?? "—"}\n` +
