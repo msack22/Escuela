@@ -223,9 +223,7 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
       }
     }
 
-    // El email es el canal principal: si se envió el mail se marca como notificado.
-    // Si no hay email configurado, se usa WhatsApp como fallback.
-    const sentAny = email ? emailSent : whatsappSent;
+    const sentAny = emailSent || whatsappSent;
 
     if (sentAny) {
       await db.contestNotificationSent.createMany({
