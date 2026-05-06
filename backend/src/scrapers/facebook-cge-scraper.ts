@@ -5,7 +5,8 @@ import { chromium, type Browser, type Page } from "playwright";
 import axios from "axios";
 import path from "path";
 import { appLogger, facebookScraperLogger } from "../lib/logger.js";
-import { extractContestFieldsFromText } from "../services/contest-text-parser.js";
+import { extractContestFieldsFromText, enrichContestFieldsWithAI } from "../services/contest-text-parser.js";
+import { normalizeSubjectName } from "../lib/subject-normalizer.js";
 
 const SOURCE_NAME = "Facebook CGE Entre Ríos";
 const TOR_PROXY_URL = process.env.TOR_PROXY_URL || "socks5://127.0.0.1:9050";
@@ -1230,39 +1231,43 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
           titlePreview: p.text.slice(0, 120),
         });
 
-        const parsed = extractContestFieldsFromText({
+        const regexFields = extractContestFieldsFromText({
           title: p.text.slice(0, 200),
           description: p.text,
           fallbackContestDate: defaultDate,
           fallbackPublicationDate: defaultDate,
         });
-        const subjectName = (parsed.subjectName ?? "General").slice(0, 255);
-        let subject = await prisma.subject.findFirst({ where: { name: subjectName } });
-        if (!subject) {
-          subject = await prisma.subject.create({ data: { name: subjectName } });
-        }
+        const parsed = await enrichContestFieldsWithAI(regexFields, p.text);
 
-        await prisma.contest.create({
-          data: {
-            title: p.text.slice(0, 200),
-            description: p.text,
-            date: parsed.contestDate ?? defaultDate,
-            publication_date: parsed.publicationDate ?? defaultDate,
-            level: parsed.level ?? null,
-            shift: parsed.shift ?? null,
-            schedule: parsed.schedule ?? null,
-            hours_to_cover: parsed.hoursToCover ?? null,
-            school_id: school.id,
-            subject_id: subject.id,
-            source_url: sourceUrl,
-            source_name: SOURCE_NAME,
-            is_active: true,
-          },
-        });
+        for (const item of parsed.items) {
+          const subjectName = (normalizeSubjectName(item.subjectName) ?? item.subjectName ?? "General").slice(0, 255);
+          let subject = await prisma.subject.findFirst({ where: { name: subjectName } });
+          if (!subject) {
+            subject = await prisma.subject.create({ data: { name: subjectName } });
+          }
+
+          await prisma.contest.create({
+            data: {
+              title: p.text.slice(0, 200),
+              description: p.text,
+              date: parsed.contestDate ?? defaultDate,
+              publication_date: parsed.publicationDate ?? defaultDate,
+              level: parsed.level ?? null,
+              shift: parsed.shift ?? null,
+              schedule: parsed.schedule ?? null,
+              hours_to_cover: item.hoursToCover ?? null,
+              school_id: school.id,
+              subject_id: subject.id,
+              source_url: sourceUrl,
+              source_name: SOURCE_NAME,
+              is_active: true,
+            },
+          });
+          created++;
+        }
         // Registrar en ambos sets para evitar duplicados dentro del mismo batch
         existingUrlSet.add(sourceUrl);
         existingSlugBaseSet.add(slugBase(sourceUrl));
-        created++;
       }
 
       // ── Fase de sondeo secuencial ──────────────────────────────────────────────
@@ -1295,39 +1300,43 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
             titlePreview: p.text.slice(0, 120),
           });
 
-          const parsed = extractContestFieldsFromText({
+          const regexFields = extractContestFieldsFromText({
             title: p.text.slice(0, 200),
             description: p.text,
             fallbackContestDate: defaultDate,
             fallbackPublicationDate: defaultDate,
           });
-          const subjectName = (parsed.subjectName ?? "General").slice(0, 255);
-          let subject = await prisma.subject.findFirst({ where: { name: subjectName } });
-          if (!subject) {
-            subject = await prisma.subject.create({ data: { name: subjectName } });
-          }
+          const parsed = await enrichContestFieldsWithAI(regexFields, p.text);
 
-          await prisma.contest.create({
-            data: {
-              title: p.text.slice(0, 200),
-              description: p.text,
-              date: parsed.contestDate ?? defaultDate,
-              publication_date: parsed.publicationDate ?? defaultDate,
-              level: parsed.level ?? null,
-              shift: parsed.shift ?? null,
-              schedule: parsed.schedule ?? null,
-              hours_to_cover: parsed.hoursToCover ?? null,
-              school_id: school.id,
-              subject_id: subject.id,
-              source_url: sourceUrl,
-              source_name: SOURCE_NAME,
-              is_active: true,
-            },
-          });
+          for (const item of parsed.items) {
+            const subjectName = (normalizeSubjectName(item.subjectName) ?? item.subjectName ?? "General").slice(0, 255);
+            let subject = await prisma.subject.findFirst({ where: { name: subjectName } });
+            if (!subject) {
+              subject = await prisma.subject.create({ data: { name: subjectName } });
+            }
+
+            await prisma.contest.create({
+              data: {
+                title: p.text.slice(0, 200),
+                description: p.text,
+                date: parsed.contestDate ?? defaultDate,
+                publication_date: parsed.publicationDate ?? defaultDate,
+                level: parsed.level ?? null,
+                shift: parsed.shift ?? null,
+                schedule: parsed.schedule ?? null,
+                hours_to_cover: item.hoursToCover ?? null,
+                school_id: school.id,
+                subject_id: subject.id,
+                source_url: sourceUrl,
+                source_name: SOURCE_NAME,
+                is_active: true,
+              },
+            });
+            created++;
+          }
 
           existingUrlSet.add(sourceUrl);
           existingSlugBaseSet.add(slugBase(sourceUrl));
-          created++;
         }
       }
       // ── Fin sondeo secuencial ───────────────────────────────────────────────────

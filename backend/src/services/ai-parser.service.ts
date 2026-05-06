@@ -1,73 +1,71 @@
-/**
- * AI-powered contest field extraction using Claude (Anthropic).
- *
- * This service is used as a fallback when the regex-based parser in
- * contest-text-parser.ts leaves critical fields empty (subjectName,
- * hoursToCover, contestDate). The AI runs on Anthropic's cloud servers —
- * the backend sends the raw contest text over HTTPS and receives structured
- * JSON back.
- *
- * Requires: ANTHROPIC_API_KEY env var.
- * If the key is missing or the call fails, the function returns {} so the
- * caller can continue with whatever the regex extracted.
- */
-
 import Anthropic from "@anthropic-ai/sdk";
 import { appLogger } from "../lib/logger.js";
+import { CANONICAL_SUBJECTS } from "../lib/subject-normalizer.js";
 
-export type AIContestFields = {
+export type AIContestItem = {
   subjectName?: string;
   hoursToCover?: number;
+};
+
+export type AIContestFields = {
+  items?: AIContestItem[];
   shift?: string;
   level?: string;
-  contestDate?: string; // ISO 8601 string, e.g. "2026-04-28T10:00:00"
+  contestDate?: string; // ISO 8601
   schedule?: string;
 };
 
-// Tool schema that forces Claude to respond with structured JSON
 const EXTRACT_TOOL: Anthropic.Tool = {
   name: "extract_contest_fields",
   description:
-    "Extract structured fields from an Argentine educational contest (concurso docente) announcement. " +
-    "Return only the fields you are confident about; omit fields you cannot determine.",
+    "Extrae campos estructurados de un aviso de concurso docente argentino. " +
+    "Devolvé solo los campos que podés determinar con seguridad.",
   input_schema: {
     type: "object" as const,
     properties: {
-      subjectName: {
-        type: "string",
+      items: {
+        type: "array",
         description:
-          "Name of the subject or position (materia/cargo). E.g. 'Matemática', 'Física y Química', " +
-          "'Maestra Domiciliaria Hospitalaria', 'Preceptor'. Capitalize properly. " +
-          "Do NOT include year, division, shift, or hours.",
-      },
-      hoursToCover: {
-        type: "number",
-        description:
-          "Total hours to cover (HC = Horas Cátedra, hs = horas). " +
-          "Sum all HC/hs values mentioned. E.g. '4 HC' → 4, '2 HC + 3 HC' → 5.",
+          "Lista de materias/cargos del concurso, una por línea con sus horas. " +
+          "Si el aviso menciona varias materias (ej: '2 HC MATEMÁTICA' y '3 HC FÍSICA'), " +
+          "incluí una entrada por cada una. Si solo hay una materia, igualmente devolvé un array con un elemento.",
+        items: {
+          type: "object",
+          properties: {
+            subjectName: {
+              type: "string",
+              description:
+                "Nombre de la materia o cargo. Usá el nombre canónico más cercano de la lista cuando coincida. " +
+                "NO incluyas año, división, turno ni horas. Capitalizá correctamente.",
+            },
+            hoursToCover: {
+              type: "number",
+              description: "Horas a cubrir para esta materia (HC = Horas Cátedra, hs = horas).",
+            },
+          },
+          required: ["subjectName"],
+        },
       },
       shift: {
         type: "string",
         enum: ["mañana", "tarde", "noche"],
-        description: "Work shift: mañana, tarde, or noche.",
+        description: "Turno principal del concurso.",
       },
       level: {
         type: "string",
         enum: ["secundario", "primario", "inicial", "superior", "supervisor"],
-        description: "Education level of the contest.",
+        description: "Nivel educativo del concurso.",
       },
       contestDate: {
         type: "string",
         description:
-          "Contest date and time in ISO 8601 format (YYYY-MM-DDTHH:MM:SS). " +
-          "E.g. 'lunes 28 de abril de 2026, a las 10 hs' → '2026-04-28T10:00:00'. " +
-          "Only include if a specific date is mentioned.",
+          "Fecha y hora del concurso en ISO 8601 (YYYY-MM-DDTHH:MM:SS). " +
+          "Ej: 'lunes 28 de abril de 2026, a las 10 hs' → '2026-04-28T10:00:00'. " +
+          "Solo incluir si hay una fecha específica en el texto.",
       },
       schedule: {
         type: "string",
-        description:
-          "Schedule information: days, hours, or time windows. E.g. 'Lunes a viernes 8:00 a 12:00 hs'. " +
-          "Keep it concise.",
+        description: "Información de horario: días, horas o ventanas de tiempo. Breve.",
       },
     },
     required: [],
@@ -84,58 +82,61 @@ function getClient(): Anthropic | null {
   return _client;
 }
 
-/**
- * Calls Claude to extract structured fields from a contest text.
- * Returns partial fields — only what the model is confident about.
- * Returns {} on error or if API key is not configured.
- */
 export async function parseContestWithAI(text: string): Promise<AIContestFields> {
   const client = getClient();
   if (!client) {
-    appLogger.debug("AI parser: ANTHROPIC_API_KEY not set, skipping");
+    appLogger.debug("AI parser: ANTHROPIC_API_KEY no configurado, omitiendo");
     return {};
   }
 
+  const canonicalList = CANONICAL_SUBJECTS.join(", ");
   const prompt =
-    "The following is the raw text of an Argentine educational contest announcement " +
-    "(concurso docente). Extract the structured fields using the provided tool.\n\n" +
+    "Sos un asistente que extrae información estructurada de concursos docentes argentinos.\n\n" +
+    "Lista de materias/cargos canónicos (usá el más cercano de esta lista cuando sea posible):\n" +
+    canonicalList + "\n\n" +
+    "Un mismo aviso puede listar MÚLTIPLES materias con sus horas (ej: '2 HC MATEMÁTICA', '3 HC FÍSICA'). " +
+    "Extraé cada una como un item separado en el array.\n\n" +
     "---\n" +
-    text.slice(0, 3000) + // cap at 3k chars to stay well under token limit
+    text.slice(0, 3500) +
     "\n---";
 
   try {
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 512,
+      max_tokens: 1024,
       tools: [EXTRACT_TOOL],
       tool_choice: { type: "tool", name: "extract_contest_fields" },
       messages: [{ role: "user", content: prompt }],
     });
 
-    // Find the tool_use block in the response
     const toolUse = response.content.find(
       (block): block is Anthropic.ToolUseBlock => block.type === "tool_use",
     );
     if (!toolUse) {
-      appLogger.warn("AI parser: no tool_use block in response");
+      appLogger.warn("AI parser: no se encontró tool_use en la respuesta");
       return {};
     }
 
     const raw = toolUse.input as Record<string, unknown>;
-
-    // Validate and sanitize each field before returning
     const result: AIContestFields = {};
 
-    if (typeof raw.subjectName === "string" && raw.subjectName.trim().length >= 3) {
-      result.subjectName = raw.subjectName.trim().slice(0, 255);
+    if (Array.isArray(raw.items) && raw.items.length > 0) {
+      const validItems: AIContestItem[] = [];
+      for (const item of raw.items) {
+        if (typeof item !== "object" || !item) continue;
+        const i = item as Record<string, unknown>;
+        if (typeof i.subjectName === "string" && i.subjectName.trim().length >= 3) {
+          const parsed: AIContestItem = { subjectName: i.subjectName.trim().slice(0, 255) };
+          if (typeof i.hoursToCover === "number" && i.hoursToCover > 0 && i.hoursToCover <= 100) {
+            parsed.hoursToCover = Math.round(i.hoursToCover);
+          }
+          validItems.push(parsed);
+        }
+      }
+      if (validItems.length > 0) result.items = validItems;
     }
-    if (typeof raw.hoursToCover === "number" && raw.hoursToCover > 0 && raw.hoursToCover <= 100) {
-      result.hoursToCover = Math.round(raw.hoursToCover);
-    }
-    if (
-      typeof raw.shift === "string" &&
-      ["mañana", "tarde", "noche"].includes(raw.shift)
-    ) {
+
+    if (typeof raw.shift === "string" && ["mañana", "tarde", "noche"].includes(raw.shift)) {
       result.shift = raw.shift;
     }
     if (
@@ -151,12 +152,10 @@ export async function parseContestWithAI(text: string): Promise<AIContestFields>
       result.schedule = raw.schedule.trim().slice(0, 500);
     }
 
-    appLogger.debug("AI parser: extracted fields", { result });
+    appLogger.debug("AI parser: campos extraídos", { itemCount: result.items?.length });
     return result;
   } catch (err) {
-    appLogger.warn("AI parser: error calling Anthropic API", {
-      error: (err as Error)?.message,
-    });
+    appLogger.warn("AI parser: error llamando Anthropic API", { error: (err as Error)?.message });
     return {};
   }
 }

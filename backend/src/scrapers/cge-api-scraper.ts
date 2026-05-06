@@ -358,7 +358,6 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
     const publicationDate = publishedAt;
     // contest_date: fecha del concurso extraída del contenido del post; si no se encuentra, usamos publication_date como fallback
     const contestDate = structured.contestDate ?? publicationDate;
-    const subjectName = (normalizeSubjectName(structured.subjectName) ?? structured.subjectName ?? "General").slice(0, 255);
 
     // Resolver o crear departamento
     const canonicalName = dep.name;
@@ -387,40 +386,44 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
       });
     }
 
-    // Resolver o crear materia
-    let subject = await prisma.subject.findFirst({ where: { name: subjectName } });
-    if (!subject) {
-      subject = await prisma.subject.create({ data: { name: subjectName } });
+    // Crear un concurso por cada item (materia/horas) extraído
+    for (const item of structured.items) {
+      const subjectName = (normalizeSubjectName(item.subjectName) ?? item.subjectName ?? "General").slice(0, 255);
+      let subject = await prisma.subject.findFirst({ where: { name: subjectName } });
+      if (!subject) {
+        subject = await prisma.subject.create({ data: { name: subjectName } });
+      }
+
+      await prisma.contest.create({
+        data: {
+          title: titleText.slice(0, 500),
+          description: fullText,
+          date: contestDate,
+          publication_date: publicationDate,
+          level: structured.level ?? levelFromCat ?? null,
+          shift: structured.shift ?? null,
+          schedule: structured.schedule ?? null,
+          hours_to_cover: item.hoursToCover ?? null,
+          school_id: school.id,
+          subject_id: subject.id,
+          source_url: normalizedUrl,
+          source_name: SOURCE_NAME,
+          is_active: true,
+          is_processed: true,
+        },
+      });
+      created++;
+
+      cgeScraperLogger.info("CGE API scraper → concurso creado", {
+        url: normalizedUrl,
+        department: dep.name,
+        level: structured.level ?? levelFromCat,
+        subject: subjectName,
+        hours: item.hoursToCover,
+      });
     }
 
-    await prisma.contest.create({
-      data: {
-        title: titleText.slice(0, 500),
-        description: fullText,
-        date: contestDate,
-        publication_date: publicationDate,
-        level: structured.level ?? levelFromCat ?? null,
-        shift: structured.shift ?? null,
-        schedule: structured.schedule ?? null,
-        hours_to_cover: structured.hoursToCover ?? null,
-        school_id: school.id,
-        subject_id: subject.id,
-        source_url: normalizedUrl,
-        source_name: SOURCE_NAME,
-        is_active: true,
-        is_processed: true,
-      },
-    });
-
     existingUrlSet.add(normalizedUrl);
-    created++;
-
-    cgeScraperLogger.info("CGE API scraper → concurso creado", {
-      url: normalizedUrl,
-      department: dep.name,
-      level: structured.level ?? levelFromCat,
-      subject: subjectName,
-    });
 
     // Pausa breve entre guardados para no saturar la DB ni la AI
     await new Promise((r) => setTimeout(r, 300));
