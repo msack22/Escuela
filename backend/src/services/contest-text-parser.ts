@@ -267,7 +267,10 @@ export async function enrichContestFieldsWithAI(
   if (!merged.schedule && ai.schedule) merged.schedule = ai.schedule;
   if (!merged.contestDate && ai.contestDate) {
     const parsed = new Date(ai.contestDate);
-    if (!Number.isNaN(parsed.getTime())) merged.contestDate = parsed;
+    const pubMs = merged.publicationDate?.getTime();
+    if (!Number.isNaN(parsed.getTime()) && (!pubMs || parsed.getTime() > pubMs)) {
+      merged.contestDate = parsed;
+    }
   }
 
   return merged;
@@ -285,12 +288,17 @@ export function extractContestFieldsFromText(input: {
   const fullText = `${title}\n${description}`.trim();
 
   const publicationDate = parseDdMmYyyy(fullText) ?? input.fallbackPublicationDate;
-  let contestDate =
+
+  // La fecha del concurso debe estar dentro del contenido del aviso y ser
+  // posterior a la publicación. No usamos publicationDate como fallback aquí;
+  // si no encontramos una fecha válida devolvemos undefined y el scraper usa
+  // su propio fallback.
+  let contestDate: Date | undefined =
     parseSpanishLongDateWithOptionalTime(fullText) ??
     parseDdMmYyyy(description) ??
-    input.fallbackContestDate ??
-    publicationDate;
+    input.fallbackContestDate;
 
+  // Refinar con hora suelta si la fecha no tiene hora
   if (contestDate && contestDate.getHours() === 0 && contestDate.getMinutes() === 0) {
     const standaloneHour = extractStandaloneHour(fullText);
     if (standaloneHour) {
@@ -302,6 +310,12 @@ export function extractContestFieldsFromText(input: {
         standaloneHour.minute,
       );
     }
+  }
+
+  // Validar que la fecha del concurso sea estrictamente posterior a la publicación.
+  // Si no lo es, la extracción capturó la fecha equivocada (ej: la fecha del post).
+  if (contestDate && publicationDate && contestDate.getTime() <= publicationDate.getTime()) {
+    contestDate = undefined;
   }
 
   return {
