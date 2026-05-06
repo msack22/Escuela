@@ -5,7 +5,7 @@ import {
   extractContestFieldsFromText,
   enrichContestFieldsWithAI,
 } from "../services/contest-text-parser.js";
-import { normalizeSubjectName } from "../lib/subject-normalizer.js";
+import { normalizeSubjectName, getItemType } from "../lib/subject-normalizer.js";
 import {
   fetchWithAxios,
   fetchWithPlaywright,
@@ -612,15 +612,23 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
       // la usamos como `date` principal; si no, usamos la fecha de publicación.
       const contestDate = structured.contestDate ?? c.contestDate ?? publicationDate;
 
-      // Crear un concurso por cada item (materia/horas) extraído
+      // Resolver subjects para todos los items extraídos
+      const resolvedItems: { subjectName: string; subjectId: number; hoursToCover: number | null; itemType: string }[] = [];
       for (const item of structured.items) {
         const subjectName = (normalizeSubjectName(item.subjectName) ?? item.subjectName ?? "General").slice(0, 255);
         let subject = await prisma.subject.findFirst({ where: { name: subjectName } });
-        if (!subject) {
-          subject = await prisma.subject.create({ data: { name: subjectName } });
-        }
+        if (!subject) subject = await prisma.subject.create({ data: { name: subjectName } });
+        resolvedItems.push({ subjectName, subjectId: subject.id, hoursToCover: item.hoursToCover ?? null, itemType: getItemType(subjectName) });
+      }
+      if (resolvedItems.length === 0) {
+        let subject = await prisma.subject.findFirst({ where: { name: "General" } });
+        if (!subject) subject = await prisma.subject.create({ data: { name: "General" } });
+        resolvedItems.push({ subjectName: "General", subjectId: subject.id, hoursToCover: null, itemType: "materia" });
+      }
 
-        await prisma.contest.create({
+      const primaryItem = resolvedItems[0];
+      await prisma.$transaction(async (tx) => {
+        const contest = await tx.contest.create({
           data: {
             title: c.title,
             description: c.description ?? "",
@@ -629,17 +637,25 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
             level: structured.level ?? c.level,
             shift: structured.shift,
             schedule: structured.schedule,
-            hours_to_cover: item.hoursToCover ?? null,
+            hours_to_cover: primaryItem.hoursToCover,
             school_id: school.id,
-            subject_id: subject.id,
+            subject_id: primaryItem.subjectId,
             source_url: c.url,
             source_name: SOURCE_NAME,
             is_active: true,
             is_processed: true,
           },
         });
-        created++;
-      }
+        await tx.contestItem.createMany({
+          data: resolvedItems.map((ri) => ({
+            contest_id: contest.id,
+            subject_id: ri.subjectId,
+            hours_to_cover: ri.hoursToCover,
+            item_type: ri.itemType,
+          })),
+        });
+      });
+      created++;
     } else {
       cgeScraperLogger.info("CGE scraper → contest already exists, skipping", {
         source_url: c.url,

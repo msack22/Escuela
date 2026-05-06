@@ -69,6 +69,7 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
     include: {
       school: true,
       subject: true,
+      items: { include: { subject: true } },
     },
   });
 
@@ -107,11 +108,16 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
 
     const filtered = contests.filter((c) => {
       const schoolDep = norm(c.school?.department);
-      const subjName = norm(c.subject?.name);
-
       const depOk = !departmentSet.size || (schoolDep && departmentSet.has(schoolDep));
-      const subjOk = !subjectSet.size || (subjName && subjectSet.has(subjName));
-      return depOk && subjOk;
+      if (!depOk) return false;
+      if (!subjectSet.size) return true;
+
+      // Usar items si existen (datos nuevos), si no caer en contest.subject (datos viejos)
+      const subjectNames = c.items.length > 0
+        ? c.items.map((item) => norm(item.subject?.name))
+        : [norm(c.subject?.name)];
+
+      return subjectNames.some((sn) => sn && subjectSet.has(sn));
     });
 
     if (!filtered.length) {
@@ -159,13 +165,41 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
     }
 
     const subject = `[Concursos] ${toNotify.length} nuevo(s) concurso(s) para tus filtros`;
+
+    const formatItemsHtml = (c: (typeof toNotify)[number]) => {
+      const anyC = c as any;
+      if (Array.isArray(anyC.items) && anyC.items.length > 0) {
+        return anyC.items
+          .map((item: any) => {
+            const label = item.item_type === "cargo" ? "Cargo" : "Materia";
+            const hrs = item.hours_to_cover ? ` – ${item.hours_to_cover} hs` : "";
+            return `${label}: ${item.subject?.name ?? "—"}${hrs}`;
+          })
+          .join("<br/>");
+      }
+      return `Materia/Cargo: ${c.subject?.name ?? "—"}`;
+    };
+
+    const formatItemsText = (c: (typeof toNotify)[number]) => {
+      const anyC = c as any;
+      if (Array.isArray(anyC.items) && anyC.items.length > 0) {
+        return anyC.items
+          .map((item: any) => {
+            const label = item.item_type === "cargo" ? "Cargo" : "Materia";
+            const hrs = item.hours_to_cover ? ` – ${item.hours_to_cover} hs` : "";
+            return `  ${label}: ${item.subject?.name ?? "—"}${hrs}`;
+          })
+          .join("\n");
+      }
+      return `  Materia/Cargo: ${c.subject?.name ?? "—"}`;
+    };
+
     const html = toNotify
       .map(
         (c, i) =>
           `<p><strong>${i + 1}. ${c.title}</strong><br/>` +
           `Fecha concurso: ${formatDateTime(c.date)}<br/>` +
-          `Horas: ${c.hours_to_cover ?? "—"}<br/>` +
-          `Materia/Cargo: ${c.subject?.name ?? "—"}<br/>` +
+          formatItemsHtml(c) + `<br/>` +
           `${c.school?.city ?? ""} – ${c.school?.department ?? ""}<br/>` +
           `<a href="${c.source_url ?? ""}">Ver fuente</a></p>`,
       )
@@ -197,8 +231,7 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
         (c, i) =>
           `${i + 1}. ${c.title}\n` +
           `  Fecha concurso: ${formatDateTime(c.date)}\n` +
-          `  Horas: ${c.hours_to_cover ?? "—"}\n` +
-          `  Materia/Cargo: ${c.subject?.name ?? "—"}\n` +
+          formatItemsText(c) + `\n` +
           `  ${c.source_url}`
       );
       const preview = `[Concursos] ${toNotify.length} nuevo(s) concurso(s) para tus filtros:\n\n${lines.join("\n\n")}${email ? `\n\nTambién enviamos el detalle a ${email}.` : ""}`;

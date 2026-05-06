@@ -6,7 +6,7 @@ import axios from "axios";
 import path from "path";
 import { appLogger, facebookScraperLogger } from "../lib/logger.js";
 import { extractContestFieldsFromText, enrichContestFieldsWithAI } from "../services/contest-text-parser.js";
-import { normalizeSubjectName } from "../lib/subject-normalizer.js";
+import { normalizeSubjectName, getItemType } from "../lib/subject-normalizer.js";
 
 const SOURCE_NAME = "Facebook CGE Entre Ríos";
 const TOR_PROXY_URL = process.env.TOR_PROXY_URL || "socks5://127.0.0.1:9050";
@@ -1239,14 +1239,22 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
         });
         const parsed = await enrichContestFieldsWithAI(regexFields, p.text);
 
+        const resolvedItemsFb: { subjectName: string; subjectId: number; hoursToCover: number | null; itemType: string }[] = [];
         for (const item of parsed.items) {
           const subjectName = (normalizeSubjectName(item.subjectName) ?? item.subjectName ?? "General").slice(0, 255);
           let subject = await prisma.subject.findFirst({ where: { name: subjectName } });
-          if (!subject) {
-            subject = await prisma.subject.create({ data: { name: subjectName } });
-          }
+          if (!subject) subject = await prisma.subject.create({ data: { name: subjectName } });
+          resolvedItemsFb.push({ subjectName, subjectId: subject.id, hoursToCover: item.hoursToCover ?? null, itemType: getItemType(subjectName) });
+        }
+        if (resolvedItemsFb.length === 0) {
+          let subject = await prisma.subject.findFirst({ where: { name: "General" } });
+          if (!subject) subject = await prisma.subject.create({ data: { name: "General" } });
+          resolvedItemsFb.push({ subjectName: "General", subjectId: subject.id, hoursToCover: null, itemType: "materia" });
+        }
 
-          await prisma.contest.create({
+        const primaryItemFb = resolvedItemsFb[0];
+        await prisma.$transaction(async (tx) => {
+          const contest = await tx.contest.create({
             data: {
               title: p.text.slice(0, 200),
               description: p.text,
@@ -1255,16 +1263,24 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
               level: parsed.level ?? null,
               shift: parsed.shift ?? null,
               schedule: parsed.schedule ?? null,
-              hours_to_cover: item.hoursToCover ?? null,
+              hours_to_cover: primaryItemFb.hoursToCover,
               school_id: school.id,
-              subject_id: subject.id,
+              subject_id: primaryItemFb.subjectId,
               source_url: sourceUrl,
               source_name: SOURCE_NAME,
               is_active: true,
             },
           });
-          created++;
-        }
+          await tx.contestItem.createMany({
+            data: resolvedItemsFb.map((ri) => ({
+              contest_id: contest.id,
+              subject_id: ri.subjectId,
+              hours_to_cover: ri.hoursToCover,
+              item_type: ri.itemType,
+            })),
+          });
+        });
+        created++;
         // Registrar en ambos sets para evitar duplicados dentro del mismo batch
         existingUrlSet.add(sourceUrl);
         existingSlugBaseSet.add(slugBase(sourceUrl));
@@ -1308,14 +1324,22 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
           });
           const parsed = await enrichContestFieldsWithAI(regexFields, p.text);
 
+          const resolvedItemsSeq: { subjectName: string; subjectId: number; hoursToCover: number | null; itemType: string }[] = [];
           for (const item of parsed.items) {
             const subjectName = (normalizeSubjectName(item.subjectName) ?? item.subjectName ?? "General").slice(0, 255);
             let subject = await prisma.subject.findFirst({ where: { name: subjectName } });
-            if (!subject) {
-              subject = await prisma.subject.create({ data: { name: subjectName } });
-            }
+            if (!subject) subject = await prisma.subject.create({ data: { name: subjectName } });
+            resolvedItemsSeq.push({ subjectName, subjectId: subject.id, hoursToCover: item.hoursToCover ?? null, itemType: getItemType(subjectName) });
+          }
+          if (resolvedItemsSeq.length === 0) {
+            let subject = await prisma.subject.findFirst({ where: { name: "General" } });
+            if (!subject) subject = await prisma.subject.create({ data: { name: "General" } });
+            resolvedItemsSeq.push({ subjectName: "General", subjectId: subject.id, hoursToCover: null, itemType: "materia" });
+          }
 
-            await prisma.contest.create({
+          const primaryItemSeq = resolvedItemsSeq[0];
+          await prisma.$transaction(async (tx) => {
+            const contest = await tx.contest.create({
               data: {
                 title: p.text.slice(0, 200),
                 description: p.text,
@@ -1324,16 +1348,24 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
                 level: parsed.level ?? null,
                 shift: parsed.shift ?? null,
                 schedule: parsed.schedule ?? null,
-                hours_to_cover: item.hoursToCover ?? null,
+                hours_to_cover: primaryItemSeq.hoursToCover,
                 school_id: school.id,
-                subject_id: subject.id,
+                subject_id: primaryItemSeq.subjectId,
                 source_url: sourceUrl,
                 source_name: SOURCE_NAME,
                 is_active: true,
               },
             });
-            created++;
-          }
+            await tx.contestItem.createMany({
+              data: resolvedItemsSeq.map((ri) => ({
+                contest_id: contest.id,
+                subject_id: ri.subjectId,
+                hours_to_cover: ri.hoursToCover,
+                item_type: ri.itemType,
+              })),
+            });
+          });
+          created++;
 
           existingUrlSet.add(sourceUrl);
           existingSlugBaseSet.add(slugBase(sourceUrl));

@@ -115,4 +115,24 @@ export function normalizeSubjectName(raw: string | null | undefined): string | u
   return undefined;
 }
 
+const CARGO_NAMES = new Set([
+  "Preceptor",
+  "Rector",
+  "Secretaría",
+  "Dirección",
+  "Vicedirección",
+  "Orientación Educativa",
+  "Orientador Educacional",
+  "Asesor Pedagógico",
+  "Coordinación de Prácticas Profesionalizantes",
+  "Supervisor de Educación",
+  "Supervisor de Jóvenes y Adultos",
+  "Supervisor Escolar",
+  "Maestra Domiciliaria Hospitalaria",
+]);
+
+export function getItemType(subjectName: string): "cargo" | "materia" {
+  return CARGO_NAMES.has(subjectName) ? "cargo" : "materia";
+}
+
 export { CANONICAL_SUBJECTS };

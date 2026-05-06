@@ -39,7 +39,8 @@ model Subject {
   description String?  @db.Text
   created_at  DateTime @default(now())
 
-  contests Contest[]
+  contests     Contest[]
+  contestItems ContestItem[]
 
   @@map("subjects")
 }
@@ -69,8 +70,23 @@ model Contest {
   subject Subject @relation(fields: [subject_id], references: [id])
   alerts  Alert[]
   notifications ContestNotificationSent[]
+  items   ContestItem[]
 
   @@map("contests")
+}
+
+model ContestItem {
+  id             Int      @id @default(autoincrement())
+  contest_id     Int
+  subject_id     Int
+  hours_to_cover Int?
+  item_type      String   @default("materia") @db.VarChar(20)
+  created_at     DateTime @default(now())
+
+  contest Contest @relation(fields: [contest_id], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subject_id], references: [id])
+
+  @@map("contest_items")
 }
 
 model User {
@@ -155,7 +171,7 @@ model SchedulerRun {
 model DiscardedPost {
   id              Int      @id @default(autoincrement())
   source_name     String   @db.VarChar(255)
-  url             String   @unique @db.VarChar(2048)
+  url             String   @db.VarChar(2048)
   title           String   @db.VarChar(500)
   reason          String   @db.VarChar(100)
   keyword_matched String?  @db.VarChar(100)
