@@ -16,6 +16,7 @@ export type AIContestFields = {
   contestDate?: string; // ISO 8601
   dateNotes?: string;
   schedule?: string;
+  schoolName?: string;
 };
 
 const EXTRACT_TOOL: Anthropic.Tool = {
@@ -94,6 +95,13 @@ const EXTRACT_TOOL: Anthropic.Tool = {
       schedule: {
         type: "string",
         description: "Información de horario: días, horas o ventanas de tiempo. Breve.",
+      },
+      schoolName: {
+        type: "string",
+        description:
+          "Nombre real de la escuela, instituto o establecimiento educativo donde se realiza el concurso, " +
+          "tal como aparece en el texto. Ej: 'Escuela Técnica N° 1 de Ceibas', 'Instituto Superior Paraná'. " +
+          "No incluir si el texto no menciona un nombre de establecimiento específico.",
       },
     },
     required: [],
@@ -189,8 +197,11 @@ export async function parseContestWithAI(text: string): Promise<AIContestFields>
     if (typeof raw.schedule === "string" && raw.schedule.trim().length > 0) {
       result.schedule = raw.schedule.trim().slice(0, 500);
     }
+    if (typeof raw.schoolName === "string" && raw.schoolName.trim().length >= 3) {
+      result.schoolName = raw.schoolName.trim().slice(0, 255);
+    }
 
-    appLogger.debug("AI parser: campos extraídos", { itemCount: result.items?.length });
+    appLogger.debug("AI parser: campos extraídos", { itemCount: result.items?.length, schoolName: result.schoolName });
     return result;
   } catch (err) {
     appLogger.warn("AI parser: error llamando Anthropic API", { error: (err as Error)?.message });

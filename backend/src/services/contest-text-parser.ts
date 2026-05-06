@@ -11,6 +11,7 @@ export type ParsedContestFields = {
   level?: string;
   shift?: string;
   schedule?: string;
+  schoolName?: string;
   items: ParsedContestItem[];
 };
 
@@ -278,6 +279,7 @@ export async function enrichContestFieldsWithAI(
   if (!merged.shift && ai.shift) merged.shift = ai.shift;
   if (!merged.level && ai.level) merged.level = ai.level;
   if (!merged.schedule && ai.schedule) merged.schedule = ai.schedule;
+  if (!merged.schoolName && ai.schoolName) merged.schoolName = ai.schoolName;
   if (!merged.contestDate && ai.contestDate) {
     const parsed = new Date(ai.contestDate);
     const pubMs = merged.publicationDate?.getTime();

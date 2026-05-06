@@ -228,6 +228,15 @@ setInterval(async () => {
       facebookCount: fbCount,
     };
 
+    // Marcar concursos pasados como inactivos
+    const deactivated = await prisma.contest.updateMany({
+      where: { is_active: true, date: { lt: new Date() } },
+      data: { is_active: false },
+    });
+    if (deactivated.count > 0) {
+      appLogger.info("Scheduler → concursos pasados marcados como inactivos", { count: deactivated.count });
+    }
+
     // Enviar notificaciones automáticas para concursos nuevos desde que empezó este ciclo.
     const notifSummary = await sendAutomaticContestNotifications(prisma, startedAt);
 

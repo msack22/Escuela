@@ -370,8 +370,9 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
       });
     }
 
-    // Resolver o crear escuela placeholder para el departamento
-    const schoolName = `CGE ${canonicalName}`;
+    // Resolver o crear escuela: usamos el nombre extraído por la IA si está disponible,
+    // de lo contrario usamos un placeholder con el nombre del departamento.
+    const schoolName = structured.schoolName?.trim().slice(0, 255) || `CGE ${canonicalName}`;
     let school = await prisma.school.findFirst({
       where: { name: schoolName, department_id: department.id },
     });

@@ -1239,6 +1239,16 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
         });
         const parsed = await enrichContestFieldsWithAI(regexFields, p.text);
 
+        // Resolver escuela: AI-extracted name si está disponible, sino el placeholder del feed
+        const postSchoolName = parsed.schoolName?.trim().slice(0, 255) || schoolName;
+        let postSchool = school;
+        if (postSchoolName !== schoolName) {
+          const found = await prisma.school.findFirst({ where: { name: postSchoolName, department_id: department.id } });
+          postSchool = found ?? await prisma.school.create({
+            data: { name: postSchoolName, city: fbPage.departmentName, department: fbPage.departmentName, department_id: department.id },
+          });
+        }
+
         const resolvedItemsFb: { subjectName: string; subjectId: number; hoursToCover: number | null; itemType: string }[] = [];
         for (const item of parsed.items) {
           const subjectName = (normalizeSubjectName(item.subjectName) ?? item.subjectName ?? "General").slice(0, 255);
@@ -1264,7 +1274,7 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
               shift: parsed.shift ?? null,
               schedule: parsed.schedule ?? null,
               hours_to_cover: primaryItemFb.hoursToCover,
-              school_id: school.id,
+              school_id: postSchool.id,
               subject_id: primaryItemFb.subjectId,
               source_url: sourceUrl,
               source_name: SOURCE_NAME,
@@ -1324,6 +1334,16 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
           });
           const parsed = await enrichContestFieldsWithAI(regexFields, p.text);
 
+          // Resolver escuela: AI-extracted name si está disponible, sino el placeholder del feed
+          const seqSchoolName = parsed.schoolName?.trim().slice(0, 255) || schoolName;
+          let seqSchool = school;
+          if (seqSchoolName !== schoolName) {
+            const found = await prisma.school.findFirst({ where: { name: seqSchoolName, department_id: department.id } });
+            seqSchool = found ?? await prisma.school.create({
+              data: { name: seqSchoolName, city: fbPage.departmentName, department: fbPage.departmentName, department_id: department.id },
+            });
+          }
+
           const resolvedItemsSeq: { subjectName: string; subjectId: number; hoursToCover: number | null; itemType: string }[] = [];
           for (const item of parsed.items) {
             const subjectName = (normalizeSubjectName(item.subjectName) ?? item.subjectName ?? "General").slice(0, 255);
@@ -1349,7 +1369,7 @@ export async function runFacebookCgeScraper(prisma: PrismaClient): Promise<numbe
                 shift: parsed.shift ?? null,
                 schedule: parsed.schedule ?? null,
                 hours_to_cover: primaryItemSeq.hoursToCover,
-                school_id: school.id,
+                school_id: seqSchool.id,
                 subject_id: primaryItemSeq.subjectId,
                 source_url: sourceUrl,
                 source_name: SOURCE_NAME,
