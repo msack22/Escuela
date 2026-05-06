@@ -12,6 +12,7 @@ export type AIContestFields = {
   shift?: string;
   level?: string;
   contestDate?: string; // ISO 8601
+  dateNotes?: string;
   schedule?: string;
 };
 
@@ -62,6 +63,17 @@ const EXTRACT_TOOL: Anthropic.Tool = {
           "Fecha y hora del concurso en ISO 8601 (YYYY-MM-DDTHH:MM:SS). " +
           "Ej: 'lunes 28 de abril de 2026, a las 10 hs' → '2026-04-28T10:00:00'. " +
           "Solo incluir si hay una fecha específica en el texto.",
+      },
+      dateNotes: {
+        type: "string",
+        description:
+          "Si encontraste contestDate: indicá la frase exacta del texto que usaste Y una expresión regular " +
+          "JavaScript (sin delimitadores) que capturaría ese patrón para futuros casos. " +
+          "Formato: 'TEXTO: «...frase...» | REGEX: ...patrón...'. " +
+          "Si NO encontraste fecha futura: explicá brevemente por qué. " +
+          "Ejemplos: " +
+          "'TEXTO: «se realizará el martes 20 de mayo de 2026 a las 10 hs» | REGEX: se realizará el \\\\w+ (\\\\d{1,2}) de (\\\\w+) de (\\\\d{4}) a las (\\\\d{1,2}) hs' " +
+          "o 'No hay fecha futura en el texto, solo menciona la fecha de publicación 15/04/2026.'",
       },
       schedule: {
         type: "string",
@@ -147,6 +159,9 @@ export async function parseContestWithAI(text: string): Promise<AIContestFields>
     }
     if (typeof raw.contestDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(raw.contestDate)) {
       result.contestDate = raw.contestDate;
+    }
+    if (typeof raw.dateNotes === "string" && raw.dateNotes.trim().length > 0) {
+      result.dateNotes = raw.dateNotes.trim().slice(0, 500);
     }
     if (typeof raw.schedule === "string" && raw.schedule.trim().length > 0) {
       result.schedule = raw.schedule.trim().slice(0, 500);

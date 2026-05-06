@@ -1,3 +1,5 @@
+import { appLogger } from "../lib/logger.js";
+
 export type ParsedContestItem = {
   subjectName?: string;
   hoursToCover?: number;
@@ -270,7 +272,14 @@ export async function enrichContestFieldsWithAI(
     const pubMs = merged.publicationDate?.getTime();
     if (!Number.isNaN(parsed.getTime()) && (!pubMs || parsed.getTime() > pubMs)) {
       merged.contestDate = parsed;
+      if (ai.dateNotes) {
+        appLogger.info("AI date extraction feedback (regex mejorable)", { dateNotes: ai.dateNotes, contestDate: ai.contestDate });
+      }
+    } else if (ai.dateNotes) {
+      appLogger.info("AI date extraction feedback (fecha descartada o no encontrada)", { dateNotes: ai.dateNotes, contestDate: ai.contestDate ?? null });
     }
+  } else if (!merged.contestDate && ai.dateNotes) {
+    appLogger.info("AI date extraction feedback (sin fecha)", { dateNotes: ai.dateNotes });
   }
 
   return merged;
