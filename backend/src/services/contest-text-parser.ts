@@ -262,6 +262,17 @@ export async function enrichContestFieldsWithAI(
 
   if (ai.items && ai.items.length > 0) {
     merged.items = ai.items;
+    const itemsWithNotes = ai.items.filter((item) => item.textFragment || item.regexSuggestion);
+    if (itemsWithNotes.length > 0) {
+      appLogger.info("AI subject extraction feedback (regex mejorable)", {
+        items: itemsWithNotes.map((item) => ({
+          subject: item.subjectName,
+          hours: item.hoursToCover,
+          textFragment: item.textFragment,
+          regexSuggestion: item.regexSuggestion,
+        })),
+      });
+    }
   }
 
   if (!merged.shift && ai.shift) merged.shift = ai.shift;

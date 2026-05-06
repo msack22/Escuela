@@ -5,6 +5,8 @@ import { CANONICAL_SUBJECTS } from "../lib/subject-normalizer.js";
 export type AIContestItem = {
   subjectName?: string;
   hoursToCover?: number;
+  textFragment?: string;
+  regexSuggestion?: string;
 };
 
 export type AIContestFields = {
@@ -42,6 +44,20 @@ const EXTRACT_TOOL: Anthropic.Tool = {
             hoursToCover: {
               type: "number",
               description: "Horas a cubrir para esta materia (HC = Horas Cátedra, hs = horas).",
+            },
+            textFragment: {
+              type: "string",
+              description:
+                "La frase exacta del texto de donde extrajiste esta materia/cargo y sus horas. " +
+                "Ej: '2 HC MATEMÁTICA – 3° 1° – STF – T. TARDE' o 'Cargo Preceptor TT STF'.",
+            },
+            regexSuggestion: {
+              type: "string",
+              description:
+                "Expresión regular JavaScript (sin delimitadores //) que capturaría este patrón en futuros avisos. " +
+                "Incluir grupos de captura para horas y nombre. " +
+                "Ej: '(\\\\d{1,2})\\\\s*HC\\\\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\\\\s]+?)\\\\s*[–\\\\-]' " +
+                "o 'Cargo\\\\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ\\\\s]+?)\\\\s+(?:TT|TM|STF)'.",
             },
           },
           required: ["subjectName"],
@@ -107,7 +123,8 @@ export async function parseContestWithAI(text: string): Promise<AIContestFields>
     "Lista de materias/cargos canónicos (usá el más cercano de esta lista cuando sea posible):\n" +
     canonicalList + "\n\n" +
     "Un mismo aviso puede listar MÚLTIPLES materias con sus horas (ej: '2 HC MATEMÁTICA', '3 HC FÍSICA'). " +
-    "Extraé cada una como un item separado en el array.\n\n" +
+    "Extraé cada una como un item separado en el array.\n" +
+    "Para cada item incluí también textFragment (la frase exacta del texto) y regexSuggestion (regex JS para capturar ese patrón).\n\n" +
     "---\n" +
     text.slice(0, 3500) +
     "\n---";
@@ -141,6 +158,12 @@ export async function parseContestWithAI(text: string): Promise<AIContestFields>
           const parsed: AIContestItem = { subjectName: i.subjectName.trim().slice(0, 255) };
           if (typeof i.hoursToCover === "number" && i.hoursToCover > 0 && i.hoursToCover <= 100) {
             parsed.hoursToCover = Math.round(i.hoursToCover);
+          }
+          if (typeof i.textFragment === "string" && i.textFragment.trim().length > 0) {
+            parsed.textFragment = i.textFragment.trim().slice(0, 300);
+          }
+          if (typeof i.regexSuggestion === "string" && i.regexSuggestion.trim().length > 0) {
+            parsed.regexSuggestion = i.regexSuggestion.trim().slice(0, 500);
           }
           validItems.push(parsed);
         }
