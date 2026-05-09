@@ -45,6 +45,10 @@ export const alertsRoutes: FastifyPluginAsync = async (app) => {
         }
       }
     }
+    if (!emailAddress && !whatsappNumber && !body.user_id) {
+      return reply.status(400).send({ error: "Se requiere al menos email o número de WhatsApp" });
+    }
+
     const prefs = body.subject_preferences;
     const departments = Array.isArray(body.departments) ? body.departments : [];
     const subjectPreferences =
@@ -163,6 +167,43 @@ export const alertsRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(result.statusCode).send({ detail: result.error });
     }
     return result;
+  });
+
+  // Historial de notificaciones enviadas para una alerta
+  app.get<{ Params: { id: string }; Querystring: { limit?: string } }>("/:id/history", async (req, reply) => {
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) return reply.status(400).send({ error: "Invalid id" });
+    const limit = Math.min(parseInt(req.query.limit ?? "100", 10) || 100, 200);
+
+    const rows = await req.server.prisma.contestNotificationSent.findMany({
+      where: { alert_id: id },
+      orderBy: { sent_at: "desc" },
+      take: limit,
+      include: {
+        contest: {
+          select: {
+            id: true,
+            title: true,
+            date: true,
+            level: true,
+            shift: true,
+            source_url: true,
+            school: { select: { name: true, city: true, department: true } },
+            subject: { select: { name: true } },
+            items: { include: { subject: { select: { name: true } } } },
+          },
+        },
+      },
+    });
+
+    return rows.map((r) => ({
+      id: r.id,
+      contest_id: r.contest_id,
+      sent_at: r.sent_at,
+      status: r.status,
+      error_message: r.error_message,
+      contest: r.contest,
+    }));
   });
 
   app.post<{ Body: { recipient_whatsapp?: string; recipient_email?: string; message?: string; channels?: string[] } }>("/send-multi", async () => {

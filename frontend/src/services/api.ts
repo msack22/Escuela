@@ -267,6 +267,28 @@ export const fetchAlertNotificationInfo = async () => {
   return response.data;
 };
 
+export const fetchAlertHistory = async (alertId: number, limit = 100) => {
+  const response = await api.get(`/api/alerts/${alertId}/history`, { params: { limit } });
+  return response.data as Array<{
+    id: number;
+    contest_id: number;
+    sent_at: string;
+    status: string;
+    error_message: string | null;
+    contest: {
+      id: number;
+      title: string;
+      date: string | null;
+      level: string | null;
+      shift: string | null;
+      source_url: string | null;
+      school: { name: string; city: string; department: string } | null;
+      subject: { name: string } | null;
+      items: Array<{ item_type: string; hours_to_cover: number | null; subject: { name: string } | null }>;
+    } | null;
+  }>;
+};
+
 /** Prueba de notificaciones: envía email y WhatsApp (si tiene número) con asunto y filtros en el mensaje */
 export const sendTestContestNotifications = async (
   alertId: number,
