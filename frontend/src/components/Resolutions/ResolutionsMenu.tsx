@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../../services/api';
 import React, { useState, useEffect, useCallback } from 'react';
 
 // Interfaces para TypeScript
@@ -111,7 +112,7 @@ const ResolutionsMenu = () => {
 
   const fetchResolutions = async () => {
     try {
-      const response = await fetch('http://localhost:8000/resolutions/');
+      const response = await fetch(API_BASE_URL + '/resolutions/');
       const data = await response.json();
       if (data.success) {
         setResolutions(data.data);
@@ -123,7 +124,7 @@ const ResolutionsMenu = () => {
 
   const fetchMessages = async (resolutionId: number) => {
     try {
-      const response = await fetch(`http://localhost:8000/resolutions/${resolutionId}/messages`);
+      const response = await fetch(`${API_BASE_URL}/resolutions/${resolutionId}/messages`);
       const data = await response.json();
       if (data.success) {
         setMessages(data.data);
@@ -136,8 +137,8 @@ const ResolutionsMenu = () => {
   const fetchDocuments = async (resolutionId?: number) => {
     try {
       const url = resolutionId 
-        ? `http://localhost:8000/resolutions/documents?resolution_id=${resolutionId}`
-        : 'http://localhost:8000/resolutions/documents';
+        ? `${API_BASE_URL}/resolutions/documents?resolution_id=${resolutionId}`
+        : API_BASE_URL + '/resolutions/documents';
       const response = await fetch(url);
       const data = await response.json();
       if (data.success) {
@@ -150,7 +151,7 @@ const ResolutionsMenu = () => {
 
   const fetchTags = async () => {
     try {
-      const response = await fetch('http://localhost:8000/resolutions/tags');
+      const response = await fetch(API_BASE_URL + '/resolutions/tags');
       const data = await response.json();
       if (data.success) {
         setTags(data.data);
@@ -162,7 +163,7 @@ const ResolutionsMenu = () => {
 
   const createResolution = async () => {
     try {
-      const response = await fetch('http://localhost:8000/resolutions/', {
+      const response = await fetch(API_BASE_URL + '/resolutions/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -190,7 +191,7 @@ const ResolutionsMenu = () => {
 
     setIsLoading(true);
     try {
-      const response = await fetch(`http://localhost:8000/resolutions/${selectedResolution.id}/chat`, {
+      const response = await fetch(`${API_BASE_URL}/resolutions/${selectedResolution.id}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

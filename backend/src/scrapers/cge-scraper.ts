@@ -1,7 +1,11 @@
 import type { PrismaClient } from "@prisma/client";
 import { config } from "../config.js";
 import { appLogger, cgeScraperLogger } from "../lib/logger.js";
-import { extractContestFieldsFromText } from "../services/contest-text-parser.js";
+import {
+  extractContestFieldsFromText,
+  enrichContestFieldsWithAI,
+} from "../services/contest-text-parser.js";
+import { normalizeSubjectName, getItemType } from "../lib/subject-normalizer.js";
 import {
   fetchWithAxios,
   fetchWithPlaywright,
@@ -23,7 +27,6 @@ const DEPARTAMENTAL_PAGES: Array<{ slug: string; department: string }> = [
   { slug: "islas-del-ibicuy", department: "islas del ibicuy" },
   { slug: "uruguay", department: "uruguay" },
   { slug: "victoria", department: "victoria" },
-  { slug: "villaguay", department: "villaguay" },
 ];
 
 const LEVEL_SECTIONS: Array<{ id: string; level: string }> = [
@@ -593,41 +596,64 @@ export async function runCgeScraper(prisma: PrismaClient): Promise<number> {
       where: { source_url: c.url, source_name: SOURCE_NAME },
     });
     if (!existing) {
-      const structured = extractContestFieldsFromText({
+      const regexFields = extractContestFieldsFromText({
         title: c.title,
         description: c.description,
         fallbackPublicationDate: c.publishedAt ?? fallbackDate,
         fallbackContestDate: c.contestDate,
         fallbackLevel: c.level,
       });
+      const structured = await enrichContestFieldsWithAI(
+        regexFields,
+        `${c.title}\n${c.description ?? ""}`.trim(),
+      );
       const publicationDate = structured.publicationDate ?? c.publishedAt ?? fallbackDate;
       // Si desde la nota individual pudimos extraer una fecha concreta de concurso,
       // la usamos como `date` principal; si no, usamos la fecha de publicación.
       const contestDate = structured.contestDate ?? c.contestDate ?? publicationDate;
-      const subjectName = (structured.subjectName ?? "General").slice(0, 255);
 
-      let subject = await prisma.subject.findFirst({ where: { name: subjectName } });
-      if (!subject) {
-        subject = await prisma.subject.create({ data: { name: subjectName } });
+      // Resolver subjects para todos los items extraídos
+      const resolvedItems: { subjectName: string; subjectId: number; hoursToCover: number | null; itemType: string }[] = [];
+      for (const item of structured.items) {
+        const subjectName = (normalizeSubjectName(item.subjectName) ?? item.subjectName ?? "General").slice(0, 255);
+        let subject = await prisma.subject.findFirst({ where: { name: subjectName } });
+        if (!subject) subject = await prisma.subject.create({ data: { name: subjectName } });
+        resolvedItems.push({ subjectName, subjectId: subject.id, hoursToCover: item.hoursToCover ?? null, itemType: getItemType(subjectName) });
+      }
+      if (resolvedItems.length === 0) {
+        let subject = await prisma.subject.findFirst({ where: { name: "General" } });
+        if (!subject) subject = await prisma.subject.create({ data: { name: "General" } });
+        resolvedItems.push({ subjectName: "General", subjectId: subject.id, hoursToCover: null, itemType: "materia" });
       }
 
-      await prisma.contest.create({
-        data: {
-          title: c.title,
-          description: c.description ?? "",
-          date: contestDate,
-          publication_date: publicationDate,
-          level: structured.level ?? c.level,
-          shift: structured.shift,
-          schedule: structured.schedule,
-          hours_to_cover: structured.hoursToCover,
-          school_id: school.id,
-          subject_id: subject.id,
-          source_url: c.url,
-          source_name: SOURCE_NAME,
-          is_active: true,
-          is_processed: true,
-        },
+      const primaryItem = resolvedItems[0];
+      await prisma.$transaction(async (tx) => {
+        const contest = await tx.contest.create({
+          data: {
+            title: c.title,
+            description: c.description ?? "",
+            date: contestDate,
+            publication_date: publicationDate,
+            level: structured.level ?? c.level,
+            shift: structured.shift,
+            schedule: structured.schedule,
+            hours_to_cover: primaryItem.hoursToCover,
+            school_id: school.id,
+            subject_id: primaryItem.subjectId,
+            source_url: c.url,
+            source_name: SOURCE_NAME,
+            is_active: true,
+            is_processed: true,
+          },
+        });
+        await tx.contestItem.createMany({
+          data: resolvedItems.map((ri) => ({
+            contest_id: contest.id,
+            subject_id: ri.subjectId,
+            hours_to_cover: ri.hoursToCover,
+            item_type: ri.itemType,
+          })),
+        });
       });
       created++;
     } else {

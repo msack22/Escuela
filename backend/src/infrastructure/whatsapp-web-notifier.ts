@@ -3,7 +3,7 @@
 import whatsAppPkg from "whatsapp-web.js";
 const { Client, LocalAuth } = whatsAppPkg as any;
 import qrcode from "qrcode-terminal";
-import { appLogger } from "../lib/logger.js";
+import { alertsApiLogger } from "../lib/logger.js";
 
 let client: any = null;
 let initializing = false;
@@ -11,8 +11,8 @@ let ready = false;
 
 const DEFAULT_INIT_TIMEOUT_MS = 60_000;
 
-function initClient(timeoutMs: number = DEFAULT_INIT_TIMEOUT_MS): Promise<void> {
-  appLogger.info("initClient WhatsApp Web llamado", { ready, initializing });
+async function initClient(timeoutMs: number = DEFAULT_INIT_TIMEOUT_MS): Promise<void> {
+  alertsApiLogger.info("initClient WhatsApp Web llamado", { ready, initializing });
   if (ready) return Promise.resolve();
   if (initializing) {
     return new Promise((resolve, reject) => {
@@ -31,40 +31,55 @@ function initClient(timeoutMs: number = DEFAULT_INIT_TIMEOUT_MS): Promise<void> 
   }
   initializing = true;
 
+  if (client) {
+    try { await client.destroy(); } catch {}
+    client = null;
+  }
+
   client = new Client({
     authStrategy: new LocalAuth({ clientId: "escuela-backend" }),
     puppeteer: {
       headless: false,
-      args: ["--no-sandbox", "--disable-dev-shm-usage"],
+      // Aumenta tiempos internos de CDP para reducir `Runtime.callFunctionOn timed out`.
+      protocolTimeout: 120_000,
+      // Evita algunos modales/avisos del navegador y reduce flakiness.
+      args: [
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-notifications",
+        "--disable-infobars",
+        "--no-default-browser-check",
+        "--disable-features=TranslateUI",
+      ],
     },
   });
 
   client.on("qr", (qr: any) => {
-    appLogger.info("WhatsApp QR generado. Escanealo con tu teléfono para iniciar sesión.");
+    alertsApiLogger.info("WhatsApp QR generado. Escanealo con tu teléfono para iniciar sesión.");
     qrcode.generate(qr, { small: true });
   });
 
   client.on("ready", () => {
     ready = true;
     initializing = false;
-    appLogger.info("WhatsApp Web listo (whatsapp-web.js).");
+    alertsApiLogger.info("WhatsApp Web listo (whatsapp-web.js).");
   });
 
   client.on("auth_failure", (msg: any) => {
     ready = false;
     initializing = false;
-    appLogger.error("Fallo de autenticación en WhatsApp Web", { msg });
+    alertsApiLogger.error("Fallo de autenticación en WhatsApp Web", { msg });
   });
 
   client.on("disconnected", (reason: any) => {
     ready = false;
     initializing = false;
-    appLogger.warn("WhatsApp Web desconectado, se intentará reconectar al próximo envío", { reason });
+    alertsApiLogger.warn("WhatsApp Web desconectado, se intentará reconectar al próximo envío", { reason });
   });
 
   client.initialize().catch((err: any) => {
     initializing = false;
-    appLogger.error("Error inicializando WhatsApp Web", { error: String(err) });
+    alertsApiLogger.error("Error inicializando WhatsApp Web", { error: String(err) });
   });
 
   return new Promise((resolve, reject) => {
@@ -124,39 +139,42 @@ export async function sendWhatsappMessage(toRaw: string, text: string): Promise<
   try {
     await initClient();
     if (!client || !ready) {
-      appLogger.error("WhatsApp Web no está listo para enviar mensajes");
+      alertsApiLogger.error("WhatsApp Web no está listo para enviar mensajes");
       return false;
     }
     const normalized = normalizeNumber(toRaw);
     const jid = normalized + "@c.us";
-    appLogger.info("Enviando WhatsApp", { to: jid, text: text.slice(0, 100) });
+    alertsApiLogger.info("Enviando WhatsApp", { to: jid, text: text.slice(0, 100) });
     await client.sendMessage(jid, text);
-    appLogger.info("WhatsApp enviado OK", { to: jid });
+    alertsApiLogger.info("WhatsApp enviado OK", { to: jid });
     return true;
   } catch (e) {
     const msg = (e as Error).message || "";
-    appLogger.error("Error enviando WhatsApp", { error: msg });
+    alertsApiLogger.error("Error enviando WhatsApp", { error: msg });
 
     // Si el frame de WhatsApp quedó roto, reiniciar cliente y reintentar una sola vez
     if (msg.includes("detached Frame")) {
-      appLogger.warn("Frame de WhatsApp roto, reintentando con nuevo navegador");
+      alertsApiLogger.warn("Frame de WhatsApp roto, reintentando con nuevo navegador");
       try {
         ready = false;
         initializing = false;
+        if (client) {
+          try { await client.destroy(); } catch {}
+        }
         client = null;
         await initClient();
         if (!client || !ready) {
-          appLogger.error("WhatsApp Web no está listo después del reintento");
+          alertsApiLogger.error("WhatsApp Web no está listo después del reintento");
           return false;
         }
         const normalized = normalizeNumber(toRaw);
         const jid = normalized + "@c.us";
-        appLogger.info("Enviando WhatsApp (reintento)", { to: jid, text: text.slice(0, 100) });
+        alertsApiLogger.info("Enviando WhatsApp (reintento)", { to: jid, text: text.slice(0, 100) });
         await client.sendMessage(jid, text);
-        appLogger.info("WhatsApp enviado OK tras reintento", { to: jid });
+        alertsApiLogger.info("WhatsApp enviado OK tras reintento", { to: jid });
         return true;
       } catch (e2) {
-        appLogger.error("Error enviando WhatsApp tras reintento", {
+        alertsApiLogger.error("Error enviando WhatsApp tras reintento", {
           error: (e2 as Error).message,
         });
         return false;

@@ -15,7 +15,7 @@ import {
   Select,
   DatePicker,
 } from 'antd';
-import { PlusOutlined, BellOutlined } from '@ant-design/icons';
+import { PlusOutlined, BellOutlined, HistoryOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -27,6 +27,7 @@ import {
   fetchUsers,
   fetchDepartments,
   fetchAlertNotificationInfo,
+  fetchAlertHistory,
   sendTestContestNotifications,
 } from '../../services/api';
 
@@ -37,6 +38,9 @@ const AlertManagement: React.FC = () => {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [testModalOpen, setTestModalOpen] = useState(false);
   const [testAlertId, setTestAlertId] = useState<number | null>(null);
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [historyAlertId, setHistoryAlertId] = useState<number | null>(null);
+  const [historyAlertName, setHistoryAlertName] = useState('');
   const [form] = Form.useForm();
   const [testForm] = Form.useForm();
   const queryClient = useQueryClient();
@@ -64,6 +68,12 @@ const AlertManagement: React.FC = () => {
   const { data: notificationInfo } = useQuery({
     queryKey: ['alert-notification-info'],
     queryFn: fetchAlertNotificationInfo,
+  });
+
+  const { data: historyRows = [], isLoading: historyLoading } = useQuery({
+    queryKey: ['alert-history', historyAlertId],
+    queryFn: () => fetchAlertHistory(historyAlertId!),
+    enabled: historyModalOpen && historyAlertId != null,
   });
 
   const createMutation = useMutation({
@@ -147,6 +157,12 @@ const AlertManagement: React.FC = () => {
     });
   };
 
+  const openHistoryModal = (record: any) => {
+    setHistoryAlertId(record.id);
+    setHistoryAlertName(record.user_name ?? `Alerta #${record.id}`);
+    setHistoryModalOpen(true);
+  };
+
   const openTestModal = (record: any) => {
     setTestAlertId(record.id);
     testForm.setFieldsValue({
@@ -206,8 +222,11 @@ const AlertManagement: React.FC = () => {
           <Button type="link" size="small" onClick={() => handleOpenEdit(record)}>
             Editar
           </Button>
+          <Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => openHistoryModal(record)}>
+            Historial
+          </Button>
           <Button type="link" size="small" onClick={() => openTestModal(record)}>
-            Probar notificaciones
+            Probar
           </Button>
           <Popconfirm
             title="¿Desactivar esta alerta?"
@@ -309,6 +328,79 @@ const AlertManagement: React.FC = () => {
             />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={`Historial de notificaciones — ${historyAlertName}`}
+        open={historyModalOpen}
+        onCancel={() => setHistoryModalOpen(false)}
+        footer={null}
+        width={820}
+      >
+        <Spin spinning={historyLoading}>
+          {historyRows.length === 0 && !historyLoading ? (
+            <Paragraph type="secondary">No hay notificaciones enviadas para esta alerta.</Paragraph>
+          ) : (
+            <Table
+              rowKey="id"
+              size="small"
+              dataSource={historyRows}
+              pagination={{ pageSize: 20 }}
+              columns={[
+                {
+                  title: 'Enviado',
+                  dataIndex: 'sent_at',
+                  width: 150,
+                  render: (v: string) =>
+                    new Date(v).toLocaleString('es-AR', {
+                      day: '2-digit', month: '2-digit', year: 'numeric',
+                      hour: '2-digit', minute: '2-digit',
+                    }),
+                },
+                {
+                  title: 'Concurso',
+                  dataIndex: 'contest',
+                  render: (c: any) =>
+                    c ? (
+                      <div>
+                        <div style={{ fontWeight: 500 }}>{c.title?.slice(0, 80) ?? '—'}</div>
+                        <div style={{ fontSize: 12, color: '#888' }}>
+                          {c.school?.city ?? ''} – {c.school?.department ?? ''}
+                          {c.date ? ` · ${new Date(c.date).toLocaleDateString('es-AR')}` : ''}
+                        </div>
+                        <div style={{ fontSize: 12 }}>
+                          {c.items?.length > 0
+                            ? c.items.map((it: any, i: number) => (
+                                <Tag key={i} color={it.item_type === 'cargo' ? 'purple' : 'blue'} style={{ marginBottom: 2 }}>
+                                  {it.subject?.name ?? '—'}{it.hours_to_cover ? ` ${it.hours_to_cover}hs` : ''}
+                                </Tag>
+                              ))
+                            : <Tag>{c.subject?.name ?? '—'}</Tag>}
+                        </div>
+                      </div>
+                    ) : `Concurso #${(historyRows.find((r: any) => r.contest === c) as any)?.contest_id}`,
+                },
+                {
+                  title: 'Estado',
+                  dataIndex: 'status',
+                  width: 90,
+                  render: (s: string) => (
+                    <Tag color={s === 'sent' ? 'green' : 'red'}>{s}</Tag>
+                  ),
+                },
+                {
+                  title: 'Fuente',
+                  dataIndex: 'contest',
+                  width: 80,
+                  render: (c: any) =>
+                    c?.source_url ? (
+                      <a href={c.source_url} target="_blank" rel="noreferrer">Ver</a>
+                    ) : '—',
+                },
+              ]}
+            />
+          )}
+        </Spin>
       </Modal>
 
       <Modal

@@ -1,11 +1,18 @@
-type ParsedContestFields = {
+import { appLogger } from "../lib/logger.js";
+
+export type ParsedContestItem = {
+  subjectName?: string;
+  hoursToCover?: number;
+};
+
+export type ParsedContestFields = {
   publicationDate?: Date;
   contestDate?: Date;
   level?: string;
   shift?: string;
   schedule?: string;
-  hoursToCover?: number;
-  subjectName?: string;
+  schoolName?: string;
+  items: ParsedContestItem[];
 };
 
 const MONTHS_ES: Record<string, number> = {
@@ -92,8 +99,7 @@ function extractHoursToCover(text: string): number | undefined {
     const n = Number(m[1]);
     if (!Number.isNaN(n) && n > 0) candidates.push(n);
   }
-  // Aceptamos "04 hs Materia..." pero evitamos horas de reloj (a las 10:30 hs).
-  for (const m of text.matchAll(/(?:^|\n|[.;,:]\s+)\s*(\d{1,2})\s*hs?\b(?!\s*(?:de?\s*)?\d{1,2}[:.]\d{2})/gim)) {
+  for (const m of text.matchAll(/(?:^|\n|[.;,:]\s+)\s*[•*\-]?\s*(\d{1,2})\s*hs?\b\.?(?!\s*(?:de?\s*)?\d{1,2}[:.]\d{2})/gim)) {
     const n = Number(m[1]);
     if (!Number.isNaN(n) && n > 0) candidates.push(n);
   }
@@ -103,6 +109,23 @@ function extractHoursToCover(text: string): number | undefined {
   return total > 0 ? total : undefined;
 }
 
+function cleanSubject(raw: string): string {
+  let s = raw.trim().replace(/\s+/g, " ");
+  s = s.split(/\b(?:stf|supl|titular|interino|turno|t[.\s]*ma[nñ]ana|t[.\s]*tarde|tm|tt|tn)\b/i)[0];
+  s = s.replace(/\b\d{1,2}\s*(?:°|º|ro|do|to)?\s*(?:a[nñ]o)?(?:\s+[a-z])?\b.*$/i, "");
+  s = s.replace(/\b(?:co|t|orientad[ao]|modalidad|com[uú]n)\b.*$/i, "");
+  s = s.replace(/[–\-:;,.\s]+$/g, "").trim();
+  return s;
+}
+
+function extractUnidadCurricular(line: string): string | undefined {
+  const m = line.match(/\bunidad\s+curricular\s*:\s*([^\n.]+)\b/i);
+  if (!m) return undefined;
+  const candidate = cleanSubject(m[1]);
+  if (candidate.length >= 3 && candidate.length <= 120) return candidate;
+  return undefined;
+}
+
 function extractSubjectName(text: string): string | undefined {
   const lines = text
     .split(/\r?\n/)
@@ -110,36 +133,103 @@ function extractSubjectName(text: string): string | undefined {
     .filter(Boolean);
 
   for (const line of lines) {
-    // Ej: "04 hs Maestra Domiciliaria Hospitalaria. Modalidad común..."
-    const m = line.match(/(?:^|[.;,:]\s+)(\d{1,2})\s*hs?\b[:\s-]*(.+)$/i);
+    const uc = extractUnidadCurricular(line);
+    if (uc) return uc;
+  }
+
+  for (const line of lines) {
+    const m = line.match(/(?:^|[.;,:]\s+)\s*[•*\-]?\s*(\d{1,2})\s*hs?\b\.?[:\s-]*(.+)$/i);
     if (!m) continue;
-    const tail = m[2]
+    const uc = extractUnidadCurricular(line);
+    if (uc) return uc;
+    const tail = cleanSubject(
+      m[2]
       .split(/[.;]|Modalidad|STF|Turno|horario/i)[0]
       .trim()
-      .replace(/\s+/g, " ");
+      .replace(/\s+/g, " "),
+    );
+    if (/^c[aá]tedra?s?\b/i.test(tail)) continue;
     if (tail.length >= 3 && tail.length <= 120) return tail;
   }
 
   for (const line of lines) {
-    // Ej: "2 HC FISICA Y QUIMICA – 2° 2° – STF – T. TARDE"
-    const m = line.match(/(?:^|[.;,:]\s+)(\d{1,2})\s*HC\b[:\s-]*(.+)$/i);
+    const m = line.match(/(?:^|[.;,:]\s+)\s*[•*\-]?\s*(\d{1,2})\s*HC\b\.?[:\s-]*(.+)$/i);
     if (!m) continue;
-    const tail = m[2]
+    const uc = extractUnidadCurricular(line);
+    if (uc) return uc;
+    const tail = cleanSubject(
+      m[2]
       .split(/[–-]|STF|SUPL|titular|turno|t\.\s*ma[nñ]ana|t\.\s*tarde/i)[0]
       .trim()
-      .replace(/\s+/g, " ");
+      .replace(/\s+/g, " "),
+    );
     if (tail.length >= 3 && tail.length <= 120) return tail;
   }
 
   for (const line of lines) {
-    // Ej: "Cargo Preceptor TT STF ..."
     const m = line.match(/\bcargo\s+([a-záéíóúñ][a-záéíóúñ\s]+?)(?:\s+\b(?:tm|tt|tn|stf|supl|titular|interino)\b|[.;,-]|$)/i);
     if (!m) continue;
-    const tail = m[1].trim().replace(/\s+/g, " ");
+    const tail = cleanSubject(m[1].trim().replace(/\s+/g, " "));
     if (tail.length >= 3 && tail.length <= 120) return tail;
   }
 
   return undefined;
+}
+
+/**
+ * Extrae todos los items (materia + horas) de un texto de concurso.
+ * Devuelve un array con una entrada por cada línea que identifica una materia/cargo.
+ * Si no encuentra patrón multi-item, devuelve un array con el resultado de la
+ * extracción de materia/horas única.
+ */
+export function extractContestItems(text: string): ParsedContestItem[] {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const items: ParsedContestItem[] = [];
+
+  for (const line of lines) {
+    const ucName = extractUnidadCurricular(line);
+
+    // "2 HC MATEMÁTICA – 3° 1° – STF – T. TARDE"
+    const hcMatch = line.match(/^[•*\-]?\s*(\d{1,2})\s*HC\b\.?[:\s\-]*(.+)/i);
+    if (hcMatch) {
+      const hours = Number(hcMatch[1]);
+      const raw = hcMatch[2]
+        .split(/\s*[–\-]\s*|\bSTF\b|\bSUPL\b|titular|turno|t\.\s*ma[nñ]ana|t\.\s*tarde/i)[0]
+        .trim();
+      const subject = ucName ?? cleanSubject(raw);
+      if (subject.length >= 3 && !(/^c[aá]tedra?s?\b/i.test(subject))) {
+        items.push({ subjectName: subject, hoursToCover: hours > 0 ? hours : undefined });
+        continue;
+      }
+    }
+
+    // "04 hs Maestra Domiciliaria Hospitalaria..."
+    const hsMatch = line.match(/^[•*\-]?\s*(\d{1,2})\s*hs?\b\.?[:\s\-]*(.+)/i);
+    if (hsMatch) {
+      // Evitar horas de reloj: "a las 10:30 hs"
+      if (/^\d{1,2}[:.]\d{2}/.test(hsMatch[2].trimStart())) continue;
+      const hours = Number(hsMatch[1]);
+      const raw = hsMatch[2]
+        .split(/[.;]|Modalidad|\bSTF\b|Turno|horario/i)[0]
+        .trim();
+      const subject = ucName ?? cleanSubject(raw);
+      if (subject.length >= 3 && !(/^c[aá]tedra?s?\b/i.test(subject))) {
+        items.push({ subjectName: subject, hoursToCover: hours > 0 ? hours : undefined });
+        continue;
+      }
+    }
+  }
+
+  // Fallback: extracción de materia/horas única
+  if (items.length === 0) {
+    const singleSubject = extractSubjectName(text);
+    const singleHours = extractHoursToCover(text);
+    if (singleSubject || singleHours) {
+      items.push({ subjectName: singleSubject, hoursToCover: singleHours });
+    }
+  }
+
+  return items;
 }
 
 function extractSchedule(text: string): string | undefined {
@@ -149,6 +239,63 @@ function extractSchedule(text: string): string | undefined {
   );
   const joined = picked.join("\n").trim();
   return joined || undefined;
+}
+
+/**
+ * Enriquece los campos parseados con IA.
+ *
+ * Estrategia:
+ * - Siempre llama a la IA para identificar materias con mayor precisión.
+ * - Si la IA devuelve items, los usa (más confiables que regex para materias).
+ * - Si la IA no devuelve items, conserva los del regex.
+ * - Para campos globales (level, shift, schedule, contestDate): el regex tiene
+ *   prioridad; la IA solo rellena lo que el regex no encontró.
+ * - Si ANTHROPIC_API_KEY no está configurado, es un no-op.
+ */
+export async function enrichContestFieldsWithAI(
+  fields: ParsedContestFields,
+  rawText: string,
+): Promise<ParsedContestFields> {
+  const { parseContestWithAI } = await import("./ai-parser.service.js");
+  const ai = await parseContestWithAI(rawText);
+
+  const merged: ParsedContestFields = { ...fields };
+
+  if (ai.items && ai.items.length > 0) {
+    merged.items = ai.items;
+    const itemsWithNotes = ai.items.filter((item) => item.textFragment || item.regexSuggestion);
+    if (itemsWithNotes.length > 0) {
+      appLogger.info("AI subject extraction feedback (regex mejorable)", {
+        items: itemsWithNotes.map((item) => ({
+          subject: item.subjectName,
+          hours: item.hoursToCover,
+          textFragment: item.textFragment,
+          regexSuggestion: item.regexSuggestion,
+        })),
+      });
+    }
+  }
+
+  if (!merged.shift && ai.shift) merged.shift = ai.shift;
+  if (!merged.level && ai.level) merged.level = ai.level;
+  if (!merged.schedule && ai.schedule) merged.schedule = ai.schedule;
+  if (!merged.schoolName && ai.schoolName) merged.schoolName = ai.schoolName;
+  if (!merged.contestDate && ai.contestDate) {
+    const parsed = new Date(ai.contestDate);
+    const pubMs = merged.publicationDate?.getTime();
+    if (!Number.isNaN(parsed.getTime()) && (!pubMs || parsed.getTime() > pubMs)) {
+      merged.contestDate = parsed;
+      if (ai.dateNotes) {
+        appLogger.info("AI date extraction feedback (regex mejorable)", { dateNotes: ai.dateNotes, contestDate: ai.contestDate });
+      }
+    } else if (ai.dateNotes) {
+      appLogger.info("AI date extraction feedback (fecha descartada o no encontrada)", { dateNotes: ai.dateNotes, contestDate: ai.contestDate ?? null });
+    }
+  } else if (!merged.contestDate && ai.dateNotes) {
+    appLogger.info("AI date extraction feedback (sin fecha)", { dateNotes: ai.dateNotes });
+  }
+
+  return merged;
 }
 
 export function extractContestFieldsFromText(input: {
@@ -163,13 +310,17 @@ export function extractContestFieldsFromText(input: {
   const fullText = `${title}\n${description}`.trim();
 
   const publicationDate = parseDdMmYyyy(fullText) ?? input.fallbackPublicationDate;
-  let contestDate =
+
+  // La fecha del concurso debe estar dentro del contenido del aviso y ser
+  // posterior a la publicación. No usamos publicationDate como fallback aquí;
+  // si no encontramos una fecha válida devolvemos undefined y el scraper usa
+  // su propio fallback.
+  let contestDate: Date | undefined =
     parseSpanishLongDateWithOptionalTime(fullText) ??
     parseDdMmYyyy(description) ??
-    input.fallbackContestDate ??
-    publicationDate;
+    input.fallbackContestDate;
 
-  // Si la fecha vino sin hora, intentamos completar con "HORA 11:00" u otros formatos.
+  // Refinar con hora suelta si la fecha no tiene hora
   if (contestDate && contestDate.getHours() === 0 && contestDate.getMinutes() === 0) {
     const standaloneHour = extractStandaloneHour(fullText);
     if (standaloneHour) {
@@ -183,13 +334,18 @@ export function extractContestFieldsFromText(input: {
     }
   }
 
+  // Validar que la fecha del concurso sea estrictamente posterior a la publicación.
+  // Si no lo es, la extracción capturó la fecha equivocada (ej: la fecha del post).
+  if (contestDate && publicationDate && contestDate.getTime() <= publicationDate.getTime()) {
+    contestDate = undefined;
+  }
+
   return {
     publicationDate,
     contestDate,
     level: detectLevel(fullText) ?? input.fallbackLevel,
     shift: detectShift(fullText),
     schedule: extractSchedule(description),
-    hoursToCover: extractHoursToCover(fullText),
-    subjectName: extractSubjectName(fullText),
+    items: extractContestItems(fullText),
   };
 }

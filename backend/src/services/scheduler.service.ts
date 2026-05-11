@@ -1,19 +1,20 @@
 import { prisma } from "../db.js";
 import { runCgeScraper } from "../scrapers/cge-scraper.js";
 import { runFacebookCgeScraper } from "../scrapers/facebook-cge-scraper.js";
+import { runCgeApiScraper } from "../scrapers/cge-api-scraper.js";
 import { appLogger } from "../lib/logger.js";
 import { sendAutomaticContestNotifications } from "./alert-auto.service.js";
 
 // Fuentes que el usuario puede elegir explícitamente desde el frontend.
 // "all" se maneja como valor implícito cuando no se envía ninguna fuente.
-const AVAILABLE_SOURCES = ["cge_simple", "cge_enterios_completo", "facebook_cge", "datos_abiertos_argentina", "puntos_digitales"];
+const AVAILABLE_SOURCES = ["cge_api"];
 
 // Zona horaria fija para el scheduler: horario de Argentina.
 const TIMEZONE = "America/Argentina/Buenos_Aires";
 
 // Configuración por defecto del scheduler automático.
 let scheduledHours: number[] = [8, 12, 16, 20]; // 8, 12, 16 y 20 hs AR
-let autoSources: string[] = ["cge_simple", "facebook_cge"];
+let autoSources: string[] = ["cge_api"];
 
 let isRunning = false;
 let lastRun: string | null = null;
@@ -36,7 +37,6 @@ type SchedulerRunInfo = {
   facebookCount: number;
 };
 
-const schedulerHistory: SchedulerRunInfo[] = [];
 
 function getArgentinaLocalParts(d: Date): { dateKey: string; hour: number } {
   const fmt = new Intl.DateTimeFormat("en-CA", {
@@ -127,8 +127,21 @@ export const schedulerService = {
       autoSources = partial.auto_sources.filter((s) => AVAILABLE_SOURCES.includes(s));
     }
   },
-  getHistory(limit = 20) {
-    return schedulerHistory.slice(-limit);
+  async getHistory(limit = 20) {
+    const rows = await prisma.schedulerRun.findMany({
+      orderBy: { started_at: "desc" },
+      take: limit,
+    });
+    return rows.map((r) => ({
+      started_at: r.started_at.toISOString(),
+      finished_at: r.finished_at.toISOString(),
+      timezone: r.timezone,
+      hour_ar: r.hour_ar,
+      sources: r.sources.split(","),
+      total_contests: r.total_contests,
+      cgeCount: r.cge_count,
+      facebookCount: r.facebook_count,
+    }));
   },
 };
 
@@ -160,7 +173,7 @@ setInterval(async () => {
   const startedAt = new Date();
   schedulerService.setCycleProgress({
     running: true,
-    step: "Scheduler automático ejecutando scraping (CGE + Facebook)...",
+    step: "Scheduler automático ejecutando scraping (CGE API)...",
     source: autoSources.join(","),
   });
 
@@ -171,9 +184,13 @@ setInterval(async () => {
   });
 
   try {
+    let apiCount = 0;
     let cgeCount = 0;
     let fbCount = 0;
 
+    if (autoSources.includes("cge_api")) {
+      apiCount = await runCgeApiScraper(prisma);
+    }
     if (autoSources.includes("cge_simple") || autoSources.includes("cge_enterios_completo")) {
       cgeCount = await runCgeScraper(prisma);
     }
@@ -181,13 +198,25 @@ setInterval(async () => {
       fbCount = await runFacebookCgeScraper(prisma);
     }
 
-    const total = cgeCount + fbCount;
+    const total = apiCount + cgeCount + fbCount;
 
     jobCount += 1;
     lastRun = startedAt.toISOString();
     nextRun = computeNextRun(startedAt);
 
     const finishedAt = new Date();
+    await prisma.schedulerRun.create({
+      data: {
+        started_at: startedAt,
+        finished_at: finishedAt,
+        timezone: TIMEZONE,
+        hour_ar: currentHourAr,
+        sources: autoSources.join(","),
+        total_contests: total,
+        cge_count: cgeCount,
+        facebook_count: fbCount,
+      },
+    });
     const runInfo: SchedulerRunInfo = {
       started_at: startedAt.toISOString(),
       finished_at: finishedAt.toISOString(),
@@ -198,7 +227,15 @@ setInterval(async () => {
       cgeCount,
       facebookCount: fbCount,
     };
-    schedulerHistory.push(runInfo);
+
+    // Marcar concursos pasados como inactivos
+    const deactivated = await prisma.contest.updateMany({
+      where: { is_active: true, date: { lt: new Date() } },
+      data: { is_active: false },
+    });
+    if (deactivated.count > 0) {
+      appLogger.info("Scheduler → concursos pasados marcados como inactivos", { count: deactivated.count });
+    }
 
     // Enviar notificaciones automáticas para concursos nuevos desde que empezó este ciclo.
     const notifSummary = await sendAutomaticContestNotifications(prisma, startedAt);

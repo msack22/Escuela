@@ -143,7 +143,13 @@
     document.querySelectorAll('a[href*="cge%2Eentrerios"]'),
     document.querySelectorAll('a[href*="l.facebook.com/l.php"]'),
     document.querySelectorAll('a[href*="lm.facebook.com/l.php"]'),
+    document.querySelectorAll('a[href*="www.facebook.com/l.php"]'),
     document.querySelectorAll('a[href*="/l.php?"][href*="entrerios.gov"]'),
+    document.querySelectorAll('a[href*="/l.php?"][href*="cge"]'),
+    document.querySelectorAll('[data-lynx-uri*="cge.entrerios.gov.ar"]'),
+    document.querySelectorAll('[data-href*="cge.entrerios.gov.ar"]'),
+    document.querySelectorAll('[data-uri*="cge.entrerios.gov.ar"]'),
+    document.querySelectorAll('[data-lynx-uri*="entrerios.gov"]'),
   ];
   for (var eli = 0; eli < earlyLists.length; eli++) {
     var nl = earlyLists[eli];
@@ -152,7 +158,13 @@
   var allCgeAnchors = Array.from(anchorSetEarly);
   for (pi = 0; pi < allCgeAnchors.length; pi++) {
     a = allCgeAnchors[pi];
-    href = a.href || a.getAttribute("href") || "";
+    href =
+      a.href ||
+      a.getAttribute("href") ||
+      a.getAttribute("data-lynx-uri") ||
+      a.getAttribute("data-href") ||
+      a.getAttribute("data-uri") ||
+      "";
     if (!href) continue;
     unwrapped = unwrapFacebookOutboundHref(href);
     cgeCandidate = tryNormalizeCgeContestUrl(unwrapped);
@@ -305,9 +317,11 @@
     "a[role='link'][href*='/l.php']",
     "a[role='link'][href*='l.facebook.com']",
     "a[role='link'][href*='lm.facebook.com']",
+    "a[role='link'][href*='www.facebook.com/l.php']",
     /** Enlaces outbound sin role="link" (común en móvil / feed). */
     "a[href*='l.facebook.com/l.php']",
     "a[href*='lm.facebook.com/l.php']",
+    "a[href*='www.facebook.com/l.php']",
   ].join(", ");
   var preferredContestAnchors = Array.from(document.querySelectorAll(preferredSel));
   var text;
@@ -487,7 +501,6 @@
   var directMatchesPreNormCount = directMatches.length;
 
   var rawUrl;
-  var cleaned;
   var normalized;
   for (pi = 0; pi < directMatches.length; pi++) {
     rawUrl = directMatches[pi];
@@ -659,17 +672,25 @@
   /**
    * Si el HTML trae -102 y -100 pero Facebook no inyecta -101 en el DOM (virtualización),
    * rellenamos los enteros entre min y max del mismo path (misma convocatoria, sufijo numérico).
+   *
+   * También aplica "cross-month seeding": si solo vemos la URL de un mes anterior (p. ej.
+   * /2026/03/convocatoria-...-192) la transformamos al mes actual (/2026/04/convocatoria-...-N)
+   * y generamos candidatos hacia arriba (192→202), de modo que posts recientes como -205/-206/-207
+   * sean descubiertos aunque Facebook no los haya incrustado como URL completa en el HTML.
+   *
+   * Bug fix: stripping trailing slashes from `pthG` antes del regex, porque `gapUrlRe` puede
+   * capturar la barra final y `^(.*)-(\d{1,4})$` falla si el string termina en '/'.
    */
   var gapHay = htmlRaw + "\n" + htmlUnescaped;
   var gapUrlRe = /https?:\/\/cge\.entrerios\.gov\.ar\/[^\s"'<>]+/gi;
   var gapM;
   var pathGroups = Object.create(null);
   while ((gapM = gapUrlRe.exec(gapHay)) !== null) {
-    var rawGap = gapM[0].replace(/[),.;]+$/, "");
+    var rawGap = gapM[0].replace(/[),.;]+$/, "").replace(/\/+$/, ""); // strip trailing punct + slashes
     try {
       var puG = new URL(rawGap);
       if (!puG.hostname.toLowerCase().includes(CGE_HOST)) continue;
-      var pthG = puG.pathname.toLowerCase();
+      var pthG = puG.pathname.toLowerCase().replace(/\/+$/, ""); // strip trailing slashes from path
       if (!/\/\d{4}\/\d{2}\//.test(pthG)) continue;
       var pnm = pthG.match(/^(.*)-(\d{1,4})$/);
       if (!pnm) continue;
@@ -684,19 +705,48 @@
   }
   var gp;
   for (gp in pathGroups) {
-    if (!pathMatchesCurrentYearMonth(gp)) continue;
+    /** Base path a usar para generar candidatos (puede ser transformado al mes actual). */
+    var gpForGen = gp;
+
+    if (!pathMatchesCurrentYearMonth(gp)) {
+      /**
+       * Cross-month seeding: URL del mes anterior encontrada en el HTML (ej: /2026/03/slug-192).
+       * Transformamos la base al mes actual (/2026/04/slug) y generamos hacia arriba.
+       * Esto captura nuevos posts como -205/-206/-207 cuando Facebook no los inyecta como URL
+       * completa (solo aparece l.php con el dominio raíz).
+       */
+      var prevMonthRe = gp.match(/^(\/\d{4}\/\d{2}\/)(.*)/);
+      if (!prevMonthRe) continue;
+      var currentMonthGp = "/" + CURRENT_Y + "/" + CURRENT_M_PADDED + "/" + prevMonthRe[2];
+      if (!looksLikeContestPath(currentMonthGp)) continue;
+      gpForGen = currentMonthGp;
+    }
+
     var numsG = pathGroups[gp];
     var uniqG = Object.create(null);
     var gix;
     for (gix = 0; gix < numsG.length; gix++) uniqG[numsG[gix]] = true;
     var numList = [];
     for (var kg in uniqG) numList.push(parseInt(kg, 10));
-    if (numList.length < 2) continue;
-    var mnG = Math.min.apply(null, numList);
-    var mxG = Math.max.apply(null, numList);
-    if (mxG - mnG > 80) continue;
+    if (numList.length < 1) continue;
+    var mnG, mxG;
+    if (numList.length === 1) {
+      /**
+       * Semilla única: generamos un rango moderado hacia arriba desde el número encontrado.
+       * Para el mes actual esto rellena posibles posts recientes no visibles en el HTML.
+       * Para cross-month (mes anterior), genera candidatos del mes actual desde ese número.
+       */
+      mnG = Math.max(1, numList[0] - 2);
+      mxG = numList[0] + 18;
+    } else {
+      mnG = Math.min.apply(null, numList);
+      mxG = Math.max.apply(null, numList);
+      if (mxG - mnG > 80) continue;
+      /** También generamos un poco hacia arriba en multi-semilla para no perdernos el siguiente. */
+      mxG = mxG + 8;
+    }
     for (var fi = mnG; fi <= mxG; fi++) {
-      var candGap = "https://cge.entrerios.gov.ar" + gp + "-" + fi;
+      var candGap = "https://cge.entrerios.gov.ar" + gpForGen + "-" + fi;
       var normGap = tryNormalizeCgeContestUrl(candGap);
       if (!normGap || seen.has(normGap)) continue;
       seen.add(normGap);

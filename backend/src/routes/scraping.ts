@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import { runCgeScraper } from "../scrapers/cge-scraper.js";
 import { runFacebookCgeScraper } from "../scrapers/facebook-cge-scraper.js";
+import { runCgeApiScraper, CgeApiUnavailableError } from "../scrapers/cge-api-scraper.js";
 import { schedulerService } from "../services/scheduler.service.js";
 import { sendAutomaticContestNotifications } from "../services/alert-auto.service.js";
 import { appLogger } from "../lib/logger.js";
@@ -16,20 +17,45 @@ export async function runScraperBySource(
   if (source === "all") {
     let total = 0;
 
-    appLogger.info("Scraping → running CGE scraper (all)");
-    const cgeCount = await runCgeScraper(prisma);
-    total += cgeCount;
+    appLogger.info("Scraping → running CGE API scraper (all)");
+    try {
+      const apiCount = await runCgeApiScraper(prisma);
+      total += apiCount;
+      appLogger.info("Scraping → CGE API scraper finished", { apiCount });
+    } catch (err) {
+      if (err instanceof CgeApiUnavailableError) {
+        appLogger.warn("Scraping → CGE API no disponible, usando fallback HTML scraper", { error: err.message });
+        const fallbackCount = await runCgeScraper(prisma);
+        total += fallbackCount;
+        appLogger.info("Scraping → CGE HTML fallback finished", { fallbackCount });
+        const fbCount = await runFacebookCgeScraper(prisma);
+        total += fbCount;
+        appLogger.info("Scraping → Facebook fallback finished", { fbCount });
+      } else {
+        throw err;
+      }
+    }
 
-    appLogger.info("Scraping → running Facebook CGE scraper (all)");
-    const fbCount = await runFacebookCgeScraper(prisma);
-    total += fbCount;
-
-    // Futuras fuentes (datos_abiertos_argentina, puntos_digitales, etc.) pueden sumarse aquí.
-
-    appLogger.info("Scraping → all scrapers finished", { total, cgeCount, fbCount });
+    appLogger.info("Scraping → all scrapers finished", { total });
     return { count: total, success: true };
   }
 
+  if (source === "cge_api") {
+    try {
+      const count = await runCgeApiScraper(prisma);
+      return { count, success: true };
+    } catch (err) {
+      if (err instanceof CgeApiUnavailableError) {
+        appLogger.warn("Scraping → CGE API no disponible, usando fallback HTML scraper", { error: err.message });
+        const fallbackCount = await runCgeScraper(prisma);
+        const fbCount = await runFacebookCgeScraper(prisma);
+        return { count: fallbackCount + fbCount, success: true };
+      }
+      throw err;
+    }
+  }
+
+  // Scrapers legacy — mantenidos como backup
   if (source === "cge_simple" || source === "cge_enterios_completo") {
     const count = await runCgeScraper(prisma);
     return { count, success: true };
@@ -224,10 +250,9 @@ export const scrapingRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post("/run-cge-simple", async (req, reply) => {
-    const start = Date.now();
     try {
-      const count = await runCgeScraper(req.server.prisma);
-      return { message: "Scraping simplificado de CGE Entre Ríos finalizado", total_contests: count, scraped_at: new Date().toISOString(), source: "cge_simple", contests: [] };
+      const count = await runCgeApiScraper(req.server.prisma);
+      return { message: "Scraping CGE Entre Ríos finalizado", total_contests: count, scraped_at: new Date().toISOString(), source: "cge_api", contests: [] };
     } catch (e) {
       return reply.status(500).send({ detail: (e as Error).message });
     }
@@ -235,8 +260,8 @@ export const scrapingRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/run-cge-completo", async (req, reply) => {
     try {
-      const count = await runCgeScraper(req.server.prisma);
-      return { message: "Scraping completo de CGE Entre Ríos finalizado", total_contests: count, scraped_at: new Date().toISOString(), source: "cge_enterios_completo" };
+      const count = await runCgeApiScraper(req.server.prisma);
+      return { message: "Scraping CGE Entre Ríos finalizado", total_contests: count, scraped_at: new Date().toISOString(), source: "cge_api" };
     } catch (e) {
       return reply.status(500).send({ detail: (e as Error).message });
     }

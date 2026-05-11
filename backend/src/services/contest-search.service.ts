@@ -6,6 +6,22 @@ const SOURCES_CAPACITACIONES_ONLY = new Set([
   "Puntos Digitales",
 ]);
 
+const LEVELS_EXCLUDED_BY_DEFAULT = ["Primaria", "Inicial"];
+
+function normalizePlaceName(value: string): string {
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  if (!trimmed) return trimmed;
+  const lower = trimmed.toLowerCase();
+  const particles = new Set(["de", "del", "la", "las", "los", "y"]);
+  return lower
+    .split(" ")
+    .map((w, idx) => {
+      if (idx > 0 && particles.has(w)) return w;
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    })
+    .join(" ");
+}
+
 export interface ContestSearchFilters {
   skip?: number;
   limit?: number;
@@ -40,7 +56,11 @@ export const contestSearchService = {
     } else {
       where.source_name = { notIn: Array.from(SOURCES_CAPACITACIONES_ONLY) };
     }
-    if (filters.level) where.level = filters.level;
+    if (filters.level) {
+      where.level = filters.level;
+    } else {
+      where.level = { notIn: LEVELS_EXCLUDED_BY_DEFAULT };
+    }
     if (filters.shift) where.shift = filters.shift;
     if (filters.contractType) where.contract_type = filters.contractType;
     if (filters.dateFrom || filters.dateTo) {
@@ -182,8 +202,19 @@ export const contestSearchService = {
   },
 
   async getAllCities(): Promise<string[]> {
-    const rows = await prisma.school.findMany({ select: { city: true }, distinct: ["city"] });
-    return rows.map((r) => r.city).filter(Boolean) as string[];
+    const rows = await prisma.school.findMany({ select: { city: true } });
+    const dedup = new Map<string, string>();
+    for (const r of rows) {
+      const raw = (r.city ?? "").trim();
+      if (!raw) continue;
+      const canonical = normalizePlaceName(raw);
+      const key = canonical
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+      if (!dedup.has(key)) dedup.set(key, canonical);
+    }
+    return Array.from(dedup.values()).sort((a, b) => a.localeCompare(b, "es"));
   },
 
   async getAllDepartments(): Promise<string[]> {
