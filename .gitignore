@@ -172,3 +172,6 @@ venv.bak/
 *.backup
 *.old
 *_backup.*
+backend/.wwebjs_auth/
+backend/.wwebjs_cache/
+backend/.playwright-facebook-profile/
