@@ -51,11 +51,6 @@ const DEPARTMENT_CONFIGS: Array<{
     name: "Uruguay",
     keywords: ["concepcion-del-uruguay", "colonia-elias", "colonia-larroque", "dde-uruguay"],
   },
-  {
-    slug: "victoria",
-    name: "Victoria",
-    keywords: ["victoria"],
-  },
 ];
 
 type WpPost = {
