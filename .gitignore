@@ -175,3 +175,7 @@ venv.bak/
 backend/.wwebjs_auth/
 backend/.wwebjs_cache/
 backend/.playwright-facebook-profile/
+
+# WhatsApp session (carpeta compartida en ~/Documents/Matias/whatsapp-session)
+.wwebjs_auth/
+.wwebjs_cache/

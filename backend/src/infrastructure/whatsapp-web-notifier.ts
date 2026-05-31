@@ -37,7 +37,10 @@ async function initClient(timeoutMs: number = DEFAULT_INIT_TIMEOUT_MS): Promise<
   }
 
   client = new Client({
-    authStrategy: new LocalAuth({ clientId: "escuela-backend" }),
+    authStrategy: new LocalAuth({
+      clientId: "escuela-backend",
+      dataPath: "/Users/matiassack/Documents/Matias/whatsapp-session",
+    }),
     puppeteer: {
       headless: false,
       // Aumenta tiempos internos de CDP para reducir `Runtime.callFunctionOn timed out`.
