@@ -112,9 +112,12 @@ function extractHoursToCover(text: string): number | undefined {
 function cleanSubject(raw: string): string {
   let s = raw.trim().replace(/\s+/g, " ");
   s = s.split(/\b(?:stf|supl|titular|interino|turno|t[.\s]*ma[nñ]ana|t[.\s]*tarde|tm|tt|tn)\b/i)[0];
-  s = s.replace(/\b\d{1,2}\s*(?:°|º|ro|do|to)?\s*(?:a[nñ]o)?(?:\s+[a-z])?\b.*$/i, "");
+  // "er" agregado a sufijos ordinales para cubrir "1er", "3er"
+  s = s.replace(/\b\d{1,2}\s*(?:°|º|er|ro|do|to)?\s*(?:a[nñ]o)?(?:\s+[a-z])?\b.*$/i, "");
   s = s.replace(/\b(?:co|t|orientad[ao]|modalidad|com[uú]n)\b.*$/i, "");
   s = s.replace(/[–\-:;,.\s]+$/g, "").trim();
+  // Quitar comillas que quedan al extraer texto entre comillas de avisos de institutos
+  s = s.replace(/["'«»""]+/g, "").trim();
   return s;
 }
 
@@ -190,7 +193,7 @@ export function extractContestItems(text: string): ParsedContestItem[] {
     const ucName = extractUnidadCurricular(line);
 
     // "2 HC MATEMÁTICA – 3° 1° – STF – T. TARDE"
-    const hcMatch = line.match(/^[•*\-]?\s*(\d{1,2})\s*HC\b\.?[:\s\-]*(.+)/i);
+    const hcMatch = line.match(/^[•*\-–—]?\s*(\d{1,2})\s*HC\b\.?[:\s\-]*(.+)/i);
     if (hcMatch) {
       const hours = Number(hcMatch[1]);
       const raw = hcMatch[2]
@@ -204,19 +207,73 @@ export function extractContestItems(text: string): ParsedContestItem[] {
     }
 
     // "04 hs Maestra Domiciliaria Hospitalaria..."
-    const hsMatch = line.match(/^[•*\-]?\s*(\d{1,2})\s*hs?\b\.?[:\s\-]*(.+)/i);
+    // También cubre formato institutos: "2ºAño 03 HS. Práctica Docente II"
+    // El prefijo de año (ej. "2ºAño", "1er. Año") se ignora antes del número de horas.
+    const hsMatch = line.match(/^(?:[•*\-–—]?\s*(?:\d+[°º]?\.?\s*(?:[a-z]+\.)?\s*[Aa][ñn]o\.?\s+)?)?[•*\-–—]?\s*(\d{1,2})\s*hs?\b\.?[:\s\-]*(.+)/i);
     if (hsMatch) {
       // Evitar horas de reloj: "a las 10:30 hs"
       if (/^\d{1,2}[:.]\d{2}/.test(hsMatch[2].trimStart())) continue;
       const hours = Number(hsMatch[1]);
       const raw = hsMatch[2]
-        .split(/[.;]|Modalidad|\bSTF\b|Turno|horario/i)[0]
+        .split(/[.;]|Modalidad|\bSTF\b|Turno|horario|\(Formato|\bCar[aá]cter\b/i)[0]
         .trim();
       const subject = ucName ?? cleanSubject(raw);
       if (subject.length >= 3 && !(/^c[aá]tedra?s?\b/i.test(subject))) {
         items.push({ subjectName: subject, hoursToCover: hours > 0 ? hours : undefined });
         continue;
       }
+    }
+
+    // "1 Cargo del perfil: Marroquinería. Larroque. Desde ..."
+    const perfilMatch = line.match(/(\d+)\s+[Cc]argo\s+del\s+perfil:\s+([^.\n]+)/i);
+    if (perfilMatch) {
+      const hours = Number(perfilMatch[1]);
+      const subject = cleanSubject(perfilMatch[2]);
+      if (subject.length >= 3) {
+        items.push({ subjectName: subject, hoursToCover: hours > 0 ? hours : undefined });
+        continue;
+      }
+    }
+
+    // "Maestro de Tecnología Escuela N°20 NEP – STF – Turno Tarde"
+    const maestroMatch = line.match(/[Mm]aestro\s+de\s+([A-Za-záéíóúñ][A-Za-záéíóúñ\s]+?)(?:\s+(?:en\s+)?(?:Escuela|UENI|N[°º]|NEP)|\s*[-–]\s*(?:STF|turno)|$)/i);
+    if (maestroMatch) {
+      const subject = cleanSubject(maestroMatch[1]);
+      if (subject.length >= 3) {
+        items.push({ subjectName: subject });
+        continue;
+      }
+    }
+
+    // "6 horas en el espacio curricular Idioma Inglés"
+    const espacioMatch = line.match(/(\d{1,2})\s+horas?\s+en\s+el\s+espacio\s+curricular\s+(?:Idioma\s+)?(.+?)(?:\s*STF|\s*[-–]|$)/i);
+    if (espacioMatch) {
+      const hours = Number(espacioMatch[1]);
+      const subject = cleanSubject(espacioMatch[2]);
+      if (subject.length >= 3) {
+        items.push({ subjectName: subject, hoursToCover: hours > 0 ? hours : undefined });
+        continue;
+      }
+    }
+
+    // "1 CARGO DE PRECEPTOR STF" / "1 Cargo de Jefe de Enseñanza y Producción 2da categoría -STF"
+    // Diferente del "Cargo del perfil:" — aquí el cargo va directo después de "de".
+    const cargoDeMatch = line.match(/^[•*\-]?\s*(\d+)\s+[Cc]argo\s+de\s+([A-Za-záéíóúñ][A-Za-záéíóúñ\s,]+?)(?:\s+\d|\s*[-–]\s*STF|\s+STF\b|$)/i);
+    if (cargoDeMatch) {
+      const hours = Number(cargoDeMatch[1]);
+      const subject = cleanSubject(cargoDeMatch[2]);
+      if (subject.length >= 3 && !/^perfil\b/i.test(subject)) {
+        items.push({ subjectName: subject, hoursToCover: hours > 0 ? hours : undefined });
+        continue;
+      }
+    }
+
+    // "1 CARGO VICERRECTOR – STF" / "CARGO VICERRECTOR – STF- DÍAS..."
+    // "Vicedirector Primera Categoría en Escuela N°8 NEP-STF"
+    const viceMatch = line.match(/(?:^[•*\-]?\s*\d+\s+)?(?:CARGO\s+)?[Vv]ice(?:director[a]?|rrector)\b/i);
+    if (viceMatch) {
+      items.push({ subjectName: "Vicedirección" });
+      continue;
     }
   }
 

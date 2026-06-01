@@ -228,6 +228,12 @@ setInterval(async () => {
       facebookCount: fbCount,
     };
 
+    // Enviar notificaciones automáticas para concursos nuevos desde que empezó este ciclo.
+    // IMPORTANTE: debe ejecutarse antes de marcar inactivos, porque algunos concursos recién
+    // scrapeados pueden tener una fecha pasada (fecha de publicación del CGE) y quedarían
+    // excluidos del filtro is_active: true antes de que se pueda notificar.
+    const notifSummary = await sendAutomaticContestNotifications(prisma, startedAt);
+
     // Marcar concursos pasados como inactivos
     const deactivated = await prisma.contest.updateMany({
       where: { is_active: true, date: { lt: new Date() } },
@@ -236,9 +242,6 @@ setInterval(async () => {
     if (deactivated.count > 0) {
       appLogger.info("Scheduler → concursos pasados marcados como inactivos", { count: deactivated.count });
     }
-
-    // Enviar notificaciones automáticas para concursos nuevos desde que empezó este ciclo.
-    const notifSummary = await sendAutomaticContestNotifications(prisma, startedAt);
 
     appLogger.info("Scheduler → automatic scraping cycle finished", {
       total,

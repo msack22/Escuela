@@ -30,6 +30,7 @@ model School {
   contests   Contest[]
   departmentRef Department? @relation(fields: [department_id], references: [id])
 
+  @@index([department_id])
   @@map("schools")
 }
 
@@ -72,6 +73,8 @@ model Contest {
   notifications ContestNotificationSent[]
   items   ContestItem[]
 
+  @@index([created_at])
+  @@index([source_url(length: 191)])
   @@map("contests")
 }
 

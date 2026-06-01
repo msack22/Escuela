@@ -74,6 +74,16 @@ function htmlToText(html: string): string {
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    // Entidades numéricas comunes en posts del CGE (WordPress las genera para guiones y comillas tipográficas)
+    .replace(/&#(\d+);/g, (_, code) => {
+      const n = Number(code);
+      // Guiones tipográficos → guión simple para que el parser los reconozca como bullets
+      if (n === 8211 || n === 8212) return "-";
+      // Comillas tipográficas → comillas ASCII
+      if (n === 8220 || n === 8221 || n === 8216 || n === 8217) return '"';
+      // Resto de entidades numéricas → espacio para no romper el texto
+      return " ";
+    })
     .replace(/\s{2,}/g, " ")
     .trim();
 }
@@ -317,6 +327,20 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
 
   let created = 0;
 
+  // Cache en memoria para evitar N+1 queries de departments y subjects durante el loop.
+  // Departments son un conjunto fijo (~17); subjects crecen lentamente.
+  const departmentCache = new Map<string, { id: number; name: string }>();
+  const subjectCache = new Map<string, number>(); // name → id
+
+  // Pre-cargar todos los departments y subjects existentes de una sola vez
+  const allDepartments = await prisma.department.findMany({ select: { id: true, name: true, slug: true } });
+  for (const d of allDepartments) {
+    departmentCache.set(d.slug, { id: d.id, name: d.name });
+    departmentCache.set(d.name, { id: d.id, name: d.name });
+  }
+  const allSubjects = await prisma.subject.findMany({ select: { id: true, name: true } });
+  for (const s of allSubjects) subjectCache.set(s.name, s.id);
+
   for (const [normalizedUrl, post] of allPosts.entries()) {
     if (existingUrlSet.has(normalizedUrl)) {
       cgeScraperLogger.info("CGE API scraper → ya existe, se omite", { url: normalizedUrl });
@@ -354,16 +378,16 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
     // contest_date: fecha del concurso extraída del contenido del post; si no se encuentra, usamos publication_date como fallback
     const contestDate = structured.contestDate ?? publicationDate;
 
-    // Resolver o crear departamento
+    // Resolver o crear departamento (cache: evita query por post)
     const canonicalName = dep.name;
-    let department = await prisma.department.findFirst({
-      where: { OR: [{ slug: dep.slug }, { name: canonicalName }] },
-    });
-    if (!department) {
-      department = await prisma.department.create({
-        data: { name: canonicalName, slug: dep.slug },
-      });
+    let departmentEntry = departmentCache.get(dep.slug) ?? departmentCache.get(canonicalName);
+    if (!departmentEntry) {
+      const created = await prisma.department.create({ data: { name: canonicalName, slug: dep.slug } });
+      departmentEntry = { id: created.id, name: created.name };
+      departmentCache.set(dep.slug, departmentEntry);
+      departmentCache.set(canonicalName, departmentEntry);
     }
+    const department = departmentEntry;
 
     // Resolver o crear escuela: usamos el nombre extraído por la IA si está disponible,
     // de lo contrario usamos un placeholder con el nombre del departamento.
@@ -382,20 +406,29 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
       });
     }
 
-    // Resolver subjects para todos los items extraídos
+    // Resolver subjects para todos los items extraídos (cache: evita query por item)
     const resolvedItems: { subjectName: string; subjectId: number; hoursToCover: number | null; itemType: string }[] = [];
     for (const item of structured.items) {
       const subjectName = (normalizeSubjectName(item.subjectName) ?? item.subjectName ?? "General").slice(0, 255);
-      let subject = await prisma.subject.findFirst({ where: { name: subjectName } });
-      if (!subject) subject = await prisma.subject.create({ data: { name: subjectName } });
-      resolvedItems.push({ subjectName, subjectId: subject.id, hoursToCover: item.hoursToCover ?? null, itemType: getItemType(subjectName) });
+      let subjectId = subjectCache.get(subjectName);
+      if (subjectId === undefined) {
+        const created = await prisma.subject.create({ data: { name: subjectName } });
+        subjectId = created.id;
+        subjectCache.set(subjectName, subjectId);
+      }
+      resolvedItems.push({ subjectName, subjectId, hoursToCover: item.hoursToCover ?? null, itemType: getItemType(subjectName) });
     }
 
     // Fallback si la extracción no encontró ningún item
     if (resolvedItems.length === 0) {
-      let subject = await prisma.subject.findFirst({ where: { name: "General" } });
-      if (!subject) subject = await prisma.subject.create({ data: { name: "General" } });
-      resolvedItems.push({ subjectName: "General", subjectId: subject.id, hoursToCover: null, itemType: "materia" });
+      const fallbackName = "General";
+      let subjectId = subjectCache.get(fallbackName);
+      if (subjectId === undefined) {
+        const created = await prisma.subject.create({ data: { name: fallbackName } });
+        subjectId = created.id;
+        subjectCache.set(fallbackName, subjectId);
+      }
+      resolvedItems.push({ subjectName: fallbackName, subjectId, hoursToCover: null, itemType: "materia" });
     }
 
     // Crear UN concurso + N ContestItems en transacción
