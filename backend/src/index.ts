@@ -1,5 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
+import rateLimit from "@fastify/rate-limit";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { appLogger, emailLogger, getLogsDir } from "./lib/logger.js";
@@ -18,7 +20,23 @@ import { schedulerService } from "./services/scheduler.service.js";
 const app = Fastify({ logger: { level: config.LOG_LEVEL } });
 app.decorate("prisma", prisma);
 
-await app.register(cors, { origin: true });
+// Solo localhost puede hacer requests (frontend corre en la misma máquina)
+await app.register(cors, {
+  origin: (origin, cb) => {
+    if (!origin || /^https?:\/\/localhost(:\d+)?$/.test(origin) || /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Not allowed by CORS"), false);
+    }
+  },
+  credentials: true,
+});
+await app.register(helmet, { contentSecurityPolicy: false }); // CSP false para no romper la UI
+await app.register(rateLimit, {
+  max: 100,
+  timeWindow: '1 minute',
+  errorResponseBuilder: () => ({ error: 'Too many requests, slow down' }),
+});
 
 await app.register(healthRoutes, { prefix: "/api" });
 await app.register(contestsRoutes, { prefix: "/api/contests" });

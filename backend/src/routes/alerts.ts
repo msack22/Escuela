@@ -71,7 +71,7 @@ export const alertsRoutes: FastifyPluginAsync = async (app) => {
     return alert;
   });
 
-  app.post<{ Body: { email_address?: string; whatsapp_number?: string; channels?: string[] } }>("/test-notification", async (req, reply) => {
+  app.post<{ Body: { email_address?: string; whatsapp_number?: string; channels?: string[] } }>("/test-notification", { config: { rateLimit: { max: 3, timeWindow: '1 minute' } } }, async (req, reply) => {
     const { email_address, whatsapp_number, channels } = req.body ?? {};
     if (!email_address && !whatsapp_number) return reply.status(400).send({ detail: "email_address or whatsapp_number required" });
     const sent: string[] = [];
