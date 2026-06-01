@@ -80,6 +80,11 @@ export const alertsRoutes: FastifyPluginAsync = async (app) => {
       const ok = await emailNotifier.send({ to: email_address, subject: "Prueba de notificación", html: "<p>Email de prueba desde el sistema de concursos.</p>" });
       if (ok) sent.push("email");
     }
+    if (whatsapp_number) {
+      const { sendWhatsappMessage } = await import("../infrastructure/whatsapp-web-notifier.js");
+      const ok = await sendWhatsappMessage(whatsapp_number, "Mensaje de prueba desde el sistema de concursos 🔔");
+      if (ok) sent.push("whatsapp");
+    }
     return { message: "Test notification sent", channels_sent: sent };
   });
 
