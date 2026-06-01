@@ -42,7 +42,7 @@ async function initClient(timeoutMs: number = DEFAULT_INIT_TIMEOUT_MS): Promise<
       dataPath: "/Users/matiassack/Documents/Matias/whatsapp-session",
     }),
     puppeteer: {
-      headless: false,
+      headless: true,
       // Aumenta tiempos internos de CDP para reducir `Runtime.callFunctionOn timed out`.
       protocolTimeout: 120_000,
       // Evita algunos modales/avisos del navegador y reduce flakiness.
