@@ -155,9 +155,9 @@ export async function sendWhatsappMessage(toRaw: string, text: string): Promise<
     const msg = (e as Error).message || "";
     alertsApiLogger.error("Error enviando WhatsApp", { error: msg });
 
-    // Si el frame de WhatsApp quedó roto, reiniciar cliente y reintentar una sola vez
-    if (msg.includes("detached Frame")) {
-      alertsApiLogger.warn("Frame de WhatsApp roto, reintentando con nuevo navegador");
+    // Si la conexión interna quedó rota (frame o comms sin iniciar), reiniciar cliente y reintentar
+    if (msg.includes("detached Frame") || msg.includes("startComms")) {
+      alertsApiLogger.warn("Conexión WhatsApp rota, reintentando con nuevo cliente", { error: msg });
       try {
         ready = false;
         initializing = false;
