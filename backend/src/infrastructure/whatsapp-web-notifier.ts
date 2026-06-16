@@ -3,7 +3,25 @@
 import whatsAppPkg from "whatsapp-web.js";
 const { Client, LocalAuth } = whatsAppPkg as any;
 import qrcode from "qrcode-terminal";
+import { execSync } from "child_process";
+import fs from "fs";
+import path from "path";
 import { alertsApiLogger } from "../lib/logger.js";
+
+const WHATSAPP_DATA_PATH = "/Users/matiassack/Documents/Matias/whatsapp-session";
+const WHATSAPP_CLIENT_ID = "escuela-backend";
+const WHATSAPP_USER_DATA_DIR = path.join(WHATSAPP_DATA_PATH, `session-${WHATSAPP_CLIENT_ID}`);
+
+function killStaleBrowser(): void {
+  try {
+    execSync(`pkill -f "${WHATSAPP_USER_DATA_DIR}"`, { stdio: "ignore" });
+    alertsApiLogger.info("WhatsApp: proceso Chrome bloqueado terminado");
+  } catch { /* no había proceso, OK */ }
+  // Eliminar lock files que Chrome deja al cerrarse de golpe
+  for (const lockFile of ["SingletonLock", "SingletonCookie", "SingletonSocket"]) {
+    try { fs.rmSync(path.join(WHATSAPP_USER_DATA_DIR, lockFile)); } catch {}
+  }
+}
 
 let client: any = null;
 let initializing = false;
@@ -36,10 +54,13 @@ async function initClient(timeoutMs: number = DEFAULT_INIT_TIMEOUT_MS): Promise<
     client = null;
   }
 
+  // Matar cualquier Chrome sobrante antes de iniciar, para evitar "browser is already running"
+  killStaleBrowser();
+
   client = new Client({
     authStrategy: new LocalAuth({
-      clientId: "escuela-backend",
-      dataPath: "/Users/matiassack/Documents/Matias/whatsapp-session",
+      clientId: WHATSAPP_CLIENT_ID,
+      dataPath: WHATSAPP_DATA_PATH,
     }),
     puppeteer: {
       headless: true,
@@ -80,9 +101,19 @@ async function initClient(timeoutMs: number = DEFAULT_INIT_TIMEOUT_MS): Promise<
     alertsApiLogger.warn("WhatsApp Web desconectado, se intentará reconectar al próximo envío", { reason });
   });
 
-  client.initialize().catch((err: any) => {
-    initializing = false;
-    alertsApiLogger.error("Error inicializando WhatsApp Web", { error: String(err) });
+  client.initialize().catch(async (err: any) => {
+    const msg = String(err);
+    if (msg.includes("browser is already running")) {
+      alertsApiLogger.warn("WhatsApp: browser bloqueado al inicializar, limpiando y reintentando...");
+      initializing = false;
+      if (client) { try { await client.destroy(); } catch {} }
+      client = null;
+      killStaleBrowser();
+      setTimeout(() => initClient().catch(() => {}), 2_000);
+    } else {
+      initializing = false;
+      alertsApiLogger.error("Error inicializando WhatsApp Web", { error: msg });
+    }
   });
 
   return new Promise((resolve, reject) => {
