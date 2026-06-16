@@ -11,7 +11,7 @@ import { z } from "zod";
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
-  PORT: z.coerce.number().default(8000),
+  PORT: z.coerce.number().default(3001),
   HOST: z.string().default("127.0.0.1"),
   SENDER_EMAIL: z.string().optional().default("").transform((s) => (s || "").trim()),
   BREVO_API_KEY: z.string().optional().default("").transform((s) => (s || "").trim()),

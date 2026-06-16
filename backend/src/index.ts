@@ -20,10 +20,14 @@ import { schedulerService } from "./services/scheduler.service.js";
 const app = Fastify({ logger: { level: config.LOG_LEVEL } });
 app.decorate("prisma", prisma);
 
-// Solo localhost puede hacer requests (frontend corre en la misma máquina)
 await app.register(cors, {
   origin: (origin, cb) => {
-    if (!origin || /^https?:\/\/localhost(:\d+)?$/.test(origin) || /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) {
+    if (
+      !origin ||
+      /^https?:\/\/localhost(:\d+)?$/.test(origin) ||
+      /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin) ||
+      /^https?:\/\/(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)\d+\.\d+(:\d+)?$/.test(origin)
+    ) {
       cb(null, true);
     } else {
       cb(new Error("Not allowed by CORS"), false);
