@@ -42,6 +42,7 @@ await app.register(rateLimit, {
   errorResponseBuilder: () => ({ error: 'Too many requests, slow down' }),
 });
 
+app.get("/", async () => ({ name: "Escuela API", status: "OK", health: "/api/health", api: "/api" }));
 await app.register(healthRoutes, { prefix: "/api" });
 await app.register(contestsRoutes, { prefix: "/api/contests" });
 await app.register(alertsRoutes, { prefix: "/api/alerts" });
