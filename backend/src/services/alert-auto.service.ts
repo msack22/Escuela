@@ -173,11 +173,11 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
           .map((item: any) => {
             const label = item.item_type === "cargo" ? "Cargo" : "Materia";
             const hrs = item.hours_to_cover ? ` – ${item.hours_to_cover} hs` : "";
-            return `${label}: ${item.subject?.name ?? "—"}${hrs}`;
+            return `<strong>${label}:</strong> ${item.subject?.name ? item.subject.name.charAt(0).toUpperCase() + item.subject.name.slice(1).toLowerCase() : "—"}${hrs}`;
           })
           .join("<br/>");
       }
-      return `Materia/Cargo: ${c.subject?.name ?? "—"}`;
+      return `<strong>Materia/Cargo:</strong> ${c.subject?.name ? c.subject.name.charAt(0).toUpperCase() + c.subject.name.slice(1).toLowerCase() : "—"}`;
     };
 
     const formatItemsText = (c: (typeof toNotify)[number]) => {
@@ -187,18 +187,18 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
           .map((item: any) => {
             const label = item.item_type === "cargo" ? "Cargo" : "Materia";
             const hrs = item.hours_to_cover ? ` – ${item.hours_to_cover} hs` : "";
-            return `  ${label}: ${item.subject?.name ?? "—"}${hrs}`;
+            return `*${label}*: ${item.subject?.name ? item.subject.name.charAt(0).toUpperCase() + item.subject.name.slice(1).toLowerCase() : "—"}${hrs}`;
           })
           .join("\n");
       }
-      return `  Materia/Cargo: ${c.subject?.name ?? "—"}`;
+      return `*Materia/Cargo*: ${c.subject?.name ? c.subject.name.charAt(0).toUpperCase() + c.subject.name.slice(1).toLowerCase() : "—"}`;
     };
 
     const html = toNotify
       .map(
         (c, i) =>
           `<p><strong>${i + 1}. ${c.title}</strong><br/>` +
-          `Fecha concurso: ${formatDateTime(c.date)}<br/>` +
+          `<strong>Fecha concurso:</strong> ${formatDateTime(c.date)}<br/>` +
           formatItemsHtml(c) + `<br/>` +
           `${c.school?.city ?? ""} – ${c.school?.department ?? ""}<br/>` +
           `<a href="${c.source_url ?? ""}">Ver fuente</a></p>`,
@@ -230,7 +230,7 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
       const lines = toNotify.map(
         (c, i) =>
           `${i + 1}. ${c.title}\n` +
-          `  Fecha concurso: ${formatDateTime(c.date)}\n` +
+          `*Fecha concurso*: ${formatDateTime(c.date)}\n` +
           formatItemsText(c) + `\n` +
           `  ${c.source_url}`
       );

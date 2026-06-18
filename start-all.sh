@@ -19,10 +19,14 @@ echo "==== Escuela - Backend (pm2) y Frontend (Vite) ===="
 echo ""
 
 # --- Backend via pm2 ---
-echo "Iniciando backend con pm2..."
-kill_port 3001
-pm2 start backend/ecosystem.config.cjs --update-env
-pm2 save
+if pm2 show escuela-backend 2>/dev/null | grep -q "online"; then
+  echo "Backend ya está corriendo en pm2 (escuela-backend), saltando..."
+else
+  echo "Iniciando backend con pm2..."
+  kill_port 3001
+  pm2 start backend/ecosystem.config.cjs --update-env
+  pm2 save
+fi
 echo "Backend →  http://localhost:3001  (pm2: escuela-backend)"
 
 echo ""

@@ -84,9 +84,9 @@ export async function handleTestContestNotifications(
     .map(
       (c) =>
         `<p><strong>${escapeHtml(c.title)}</strong><br/>` +
-        `Fecha concurso: ${escapeHtml(formatDateTime(c.date))}<br/>` +
+        `<strong>Fecha concurso:</strong> ${escapeHtml(formatDateTime(c.date))}<br/>` +
         `Horas: ${c.hours_to_cover ?? "—"}<br/>` +
-        `Materia/Cargo: ${escapeHtml(c.subject?.name ?? "—")}<br/>` +
+        `<strong>Materia/Cargo:</strong> ${escapeHtml(c.subject?.name ? c.subject.name.charAt(0).toUpperCase() + c.subject.name.slice(1).toLowerCase() : "—")}<br/>` +
         `${escapeHtml(c.school?.city ?? "")} – ${escapeHtml(c.school?.department ?? "")}<br/>` +
         `<a href="${escapeHtml(c.source?.url ?? "")}">Ver</a></p>`
     )
@@ -108,10 +108,10 @@ export async function handleTestContestNotifications(
     const lines = contests.map(
       (c) =>
         `• ${c.title}\n` +
-        `  Fecha concurso: ${formatDateTime(c.date)}\n` +
-        `  Horas: ${c.hours_to_cover ?? "—"}\n` +
-        `  Materia/Cargo: ${c.subject?.name ?? "—"}\n` +
-        `  ${c.source?.url ?? "—"}`
+        `*Fecha concurso*: ${formatDateTime(c.date)}\n` +
+        `Horas: ${c.hours_to_cover ?? "—"}\n` +
+        `*Materia*: ${c.subject?.name ? c.subject.name.charAt(0).toUpperCase() + c.subject.name.slice(1).toLowerCase() : "—"}\n` +
+        `${c.source?.url ?? "—"}`
     );
     const preview =
       `Te vamos a enviar ${destination} con ${contests.length} concurso(s).\n` +
