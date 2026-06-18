@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { schedulerService } from "../services/scheduler.service.js";
 
 export const healthRoutes: FastifyPluginAsync = async (app) => {
-  app.get("/", async () => ({ ok: true, stack: "nodejs" }));
+  app.get("/", async () => ({ name: "Escuela API", status: "OK", health: "/health", api: "/api" }));
   app.get("/status", async (req, reply) => {
     let database = "connected";
     try {
