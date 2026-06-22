@@ -167,6 +167,7 @@ model SchedulerRun {
   total_contests Int      @default(0)
   cge_count      Int      @default(0)
   facebook_count Int      @default(0)
+  fetched_total  Int      @default(0)
 
   @@map("scheduler_runs")
 }

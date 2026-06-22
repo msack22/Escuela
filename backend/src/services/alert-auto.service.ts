@@ -4,7 +4,7 @@ import { emailNotifier } from "../infrastructure/email-notifier.js";
 import { sendWhatsappMessage } from "../infrastructure/whatsapp-web-notifier.js";
 import { alertsApiLogger } from "../lib/logger.js";
 
-type ParsedPrefs = { subjects: string[]; departments: string[] };
+type ParsedPrefs = { subjects: string[]; departments: string[]; excluded_subjects: string[] };
 
 /** Inicio “seguro” para created_at: margen por desfase reloj DB / DateTime(0) y para no perder inserts del mismo segundo que el POST. */
 const NOTIFICATION_SINCE_BUFFER_MS = 120_000;
@@ -15,17 +15,17 @@ export function contestNotificationSince(runStart: Date | number): Date {
 }
 
 function parsePreferences(raw: string | null): ParsedPrefs {
-  if (!raw) return { subjects: [], departments: [] };
+  if (!raw) return { subjects: [], departments: [], excluded_subjects: [] };
 
   try {
     const parsed = JSON.parse(raw);
 
     // Formato viejo: ["Matemática", "Lengua"]
     if (Array.isArray(parsed)) {
-      return { subjects: parsed.filter((x) => typeof x === "string"), departments: [] };
+      return { subjects: parsed.filter((x) => typeof x === "string"), departments: [], excluded_subjects: [] };
     }
 
-    // Formato nuevo: { subjects: [...], departments: [...] }
+    // Formato nuevo: { subjects: [...], departments: [...], excluded_subjects: [...] }
     const anyParsed = parsed as any;
     const subjects = Array.isArray(anyParsed.subjects)
       ? anyParsed.subjects.filter((x: unknown) => typeof x === "string")
@@ -33,10 +33,13 @@ function parsePreferences(raw: string | null): ParsedPrefs {
     const departments = Array.isArray(anyParsed.departments)
       ? anyParsed.departments.filter((x: unknown) => typeof x === "string")
       : [];
+    const excluded_subjects = Array.isArray(anyParsed.excluded_subjects)
+      ? anyParsed.excluded_subjects.filter((x: unknown) => typeof x === "string")
+      : [];
 
-    return { subjects, departments };
+    return { subjects, departments, excluded_subjects };
   } catch {
-    return { subjects: [], departments: [] };
+    return { subjects: [], departments: [], excluded_subjects: [] };
   }
 }
 
@@ -97,28 +100,43 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
   let notificationsCreated = 0;
 
   for (const alert of alerts) {
-    const { subjects, departments } = parsePreferences(alert.subject_preferences);
+    const { subjects, departments, excluded_subjects } = parsePreferences(alert.subject_preferences);
 
     // Normalizamos para comparación case-insensitive (y tolerar mayúsculas/minúsculas distintas).
     const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
     const subjectSet =
       subjects && subjects.length ? new Set(subjects.map((s) => norm(s))) : new Set<string>();
+    const excludedSet =
+      excluded_subjects && excluded_subjects.length ? new Set(excluded_subjects.map((s) => norm(s))) : new Set<string>();
     const departmentSet =
       departments && departments.length ? new Set(departments.map((d) => norm(d))) : new Set<string>();
 
-    const filtered = contests.filter((c) => {
-      const schoolDep = norm(c.school?.department);
-      const depOk = !departmentSet.size || (schoolDep && departmentSet.has(schoolDep));
-      if (!depOk) return false;
-      if (!subjectSet.size) return true;
+    // Para cada concurso, calculamos los ítems visibles después de aplicar include/exclude
+    type ContestWithVisibleItems = { contest: typeof contests[number]; visibleItems: typeof contests[number]["items"] };
+    const contestsWithItems: ContestWithVisibleItems[] = contests
+      .filter((c) => {
+        const schoolDep = norm(c.school?.department);
+        return !departmentSet.size || (schoolDep && departmentSet.has(schoolDep));
+      })
+      .map((c) => {
+        // Usar items si existen (datos nuevos), si no usar el subject del concurso como ítem único
+        let items = c.items.length > 0 ? [...c.items] : (c.subject ? [{ ...c, subject: c.subject, hours_to_cover: null, item_type: "subject" } as any] : []);
 
-      // Usar items si existen (datos nuevos), si no caer en contest.subject (datos viejos)
-      const subjectNames = c.items.length > 0
-        ? c.items.map((item) => norm(item.subject?.name))
-        : [norm(c.subject?.name)];
+        // 1. Excluir materias que el usuario no quiere
+        if (excludedSet.size) {
+          items = items.filter((item: any) => !excludedSet.has(norm(item.subject?.name)));
+        }
 
-      return subjectNames.some((sn) => sn && subjectSet.has(sn));
-    });
+        // 2. Si hay lista de "quiero", filtrar solo esas
+        if (subjectSet.size) {
+          items = items.filter((item: any) => subjectSet.has(norm(item.subject?.name)));
+        }
+
+        return { contest: c, visibleItems: items };
+      })
+      .filter(({ visibleItems }) => visibleItems.length > 0);
+
+    const filtered = contestsWithItems.map(({ contest }) => contest);
 
     if (!filtered.length) {
       alertsApiLogger.info("AlertAuto → alerta sin concursos que coincidan con filtros", {
@@ -166,10 +184,9 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
 
     const subject = `[Concursos] ${toNotify.length} nuevo(s) concurso(s) para tus filtros`;
 
-    const formatItemsHtml = (c: (typeof toNotify)[number]) => {
-      const anyC = c as any;
-      if (Array.isArray(anyC.items) && anyC.items.length > 0) {
-        return anyC.items
+    const formatItemsHtml = (items: any[]) => {
+      if (items.length > 0) {
+        return items
           .map((item: any) => {
             const label = item.item_type === "cargo" ? "Cargo" : "Materia";
             const hrs = item.hours_to_cover ? ` – ${item.hours_to_cover} hs` : "";
@@ -177,13 +194,12 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
           })
           .join("<br/>");
       }
-      return `<strong>Materia/Cargo:</strong> ${c.subject?.name ? c.subject.name.charAt(0).toUpperCase() + c.subject.name.slice(1).toLowerCase() : "—"}`;
+      return `<strong>Materia/Cargo:</strong> —`;
     };
 
-    const formatItemsText = (c: (typeof toNotify)[number]) => {
-      const anyC = c as any;
-      if (Array.isArray(anyC.items) && anyC.items.length > 0) {
-        return anyC.items
+    const formatItemsText = (items: any[]) => {
+      if (items.length > 0) {
+        return items
           .map((item: any) => {
             const label = item.item_type === "cargo" ? "Cargo" : "Materia";
             const hrs = item.hours_to_cover ? ` – ${item.hours_to_cover} hs` : "";
@@ -191,18 +207,20 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
           })
           .join("\n");
       }
-      return `*Materia/Cargo*: ${c.subject?.name ? c.subject.name.charAt(0).toUpperCase() + c.subject.name.slice(1).toLowerCase() : "—"}`;
+      return `*Materia/Cargo*: —`;
     };
 
     const html = toNotify
-      .map(
-        (c, i) =>
+      .map((c, i) => {
+        const visibleItems = contestsWithItems.find(({ contest }) => contest.id === c.id)?.visibleItems ?? (c as any).items;
+        return (
           `<p><strong>${i + 1}. ${c.title}</strong><br/>` +
           `<strong>Fecha concurso:</strong> ${formatDateTime(c.date)}<br/>` +
-          formatItemsHtml(c) + `<br/>` +
+          formatItemsHtml(visibleItems) + `<br/>` +
           `${c.school?.city ?? ""} – ${c.school?.department ?? ""}<br/>` +
-          `<a href="${c.source_url ?? ""}">Ver fuente</a></p>`,
-      )
+          `<a href="${c.source_url ?? ""}">Ver fuente</a></p>`
+        );
+      })
       .join("");
 
     let emailSent = false;
@@ -227,13 +245,15 @@ export async function sendAutomaticContestNotifications(db: PrismaClient, runSta
 
     let whatsappSent = false;
     if (whatsapp) {
-      const lines = toNotify.map(
-        (c, i) =>
+      const lines = toNotify.map((c, i) => {
+        const visibleItems = contestsWithItems.find(({ contest }) => contest.id === c.id)?.visibleItems ?? (c as any).items;
+        return (
           `${i + 1}. ${c.title}\n` +
           `*Fecha concurso*: ${formatDateTime(c.date)}\n` +
-          formatItemsText(c) + `\n` +
+          formatItemsText(visibleItems) + `\n` +
           `  ${c.source_url}`
-      );
+        );
+      });
       const preview = `[Concursos] ${toNotify.length} nuevo(s) concurso(s) para tus filtros:\n\n${lines.join("\n\n")}${email ? `\n\nTambién enviamos el detalle a ${email}.` : ""}`;
       const WA_MAX_ATTEMPTS = 3;
       for (let attempt = 1; attempt <= WA_MAX_ATTEMPTS && !whatsappSent; attempt++) {

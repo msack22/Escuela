@@ -1,6 +1,7 @@
 import React from 'react';
-import { Card, Typography, Button, Space, Alert, Descriptions, Select, Table, Tag } from 'antd';
-import { PlayCircleOutlined, StopOutlined, ThunderboltOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Card, Typography, Button, Space, Alert, Descriptions, Select, Table, Tag, Statistic, Row, Col, Spin } from 'antd';
+import { PlayCircleOutlined, StopOutlined, ThunderboltOutlined, ReloadOutlined, DatabaseOutlined, ApiOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import api from '../../services/api';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getSchedulerStatus,
@@ -10,6 +11,7 @@ import {
   updateSchedulerConfig,
   getSchedulerHistory,
   SchedulerHistoryRun,
+  fetchContests,
 } from '../../services/api';
 
 const { Title, Text } = Typography;
@@ -27,6 +29,8 @@ const SchedulerControl: React.FC = () => {
   const [selectedSources, setSelectedSources] = React.useState<string[]>([]);
   const [configHours, setConfigHours] = React.useState<number[]>([8, 12, 16, 20]);
   const [configSources, setConfigSources] = React.useState<string[]>(['cge_simple', 'facebook_cge']);
+  const [cgeHealth, setCgeHealth] = React.useState<{ ok: boolean; posts_sample_count: number; sample: any[]; error?: string; checked_at: string } | null>(null);
+  const [cgeHealthLoading, setCgeHealthLoading] = React.useState(false);
 
   const { data: schedulerConfig } = useQuery({
     queryKey: ['schedulerConfig'],
@@ -36,6 +40,12 @@ const SchedulerControl: React.FC = () => {
   const { data: schedulerHistory } = useQuery({
     queryKey: ['schedulerHistory'],
     queryFn: () => getSchedulerHistory(20),
+    refetchInterval: 60000,
+  });
+
+  const { data: contestsData } = useQuery({
+    queryKey: ['contestsTotal'],
+    queryFn: () => fetchContests({ page: 1, limit: 1 }),
     refetchInterval: 60000,
   });
 
@@ -112,9 +122,24 @@ const SchedulerControl: React.FC = () => {
         )),
     },
     {
-      title: 'Concursos totales',
+      title: 'Encontrados (API)',
+      dataIndex: 'fetched_total',
+      key: 'fetched_total',
+      render: (v: number) => (
+        <span style={{ color: v > 0 ? '#1677ff' : '#888' }} title="Total de concursos que devolvió la CGE API (cualquier departamento)">
+          {v ?? 0}
+        </span>
+      ),
+    },
+    {
+      title: 'Nuevos guardados',
       dataIndex: 'total_contests',
       key: 'total_contests',
+      render: (v: number) => (
+        <span style={{ color: v > 0 ? '#52c41a' : '#888' }}>
+          {v > 0 ? `+${v}` : '0'}
+        </span>
+      ),
     },
     {
       title: 'CGE',
@@ -255,7 +280,39 @@ const SchedulerControl: React.FC = () => {
         </Space>
       </Card>
 
-      <Card title="Historial de ejecuciones automáticas" style={{ marginTop: 24 }}>
+      <Row gutter={16} style={{ marginTop: 24, marginBottom: 8 }}>
+        <Col span={8}>
+          <Card>
+            <Statistic
+              title="Total concursos en BD"
+              value={contestsData?.total ?? '...'}
+              prefix={<DatabaseOutlined />}
+              valueStyle={{ color: '#1677ff' }}
+            />
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card>
+            <Statistic
+              title="Nuevos (último run)"
+              value={schedulerHistory?.runs?.[0]?.total_contests ?? 0}
+              valueStyle={{ color: (schedulerHistory?.runs?.[0]?.total_contests ?? 0) > 0 ? '#52c41a' : '#888' }}
+            />
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card>
+            <Statistic
+              title="Runs hoy"
+              value={schedulerHistory?.runs?.filter(r =>
+                new Date(r.started_at).toDateString() === new Date().toDateString()
+              ).length ?? 0}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      <Card title="Historial de ejecuciones automáticas" style={{ marginTop: 8 }}>
         <Table
           size="small"
           rowKey={(row) => row.started_at}

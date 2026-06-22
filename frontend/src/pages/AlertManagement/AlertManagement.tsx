@@ -106,6 +106,7 @@ const AlertManagement: React.FC = () => {
       user_id: undefined,
       user_name: '',
       subject_preferences: [],
+      excluded_subjects: [],
       departments: [],
     });
     setModalOpen(true);
@@ -130,6 +131,7 @@ const AlertManagement: React.FC = () => {
       user_id: record.user_id ?? undefined,
       user_name: record.user_name,
       subject_preferences: record.subject_preferences ?? [],
+      excluded_subjects: record.excluded_subjects ?? [],
       departments: record.departments ?? [],
     });
     setModalOpen(true);
@@ -143,6 +145,7 @@ const AlertManagement: React.FC = () => {
           data: {
             user_name: values.user_name,
             subject_preferences: values.subject_preferences,
+            excluded_subjects: values.excluded_subjects ?? [],
             departments: values.departments,
           },
         });
@@ -151,6 +154,7 @@ const AlertManagement: React.FC = () => {
           user_id: values.user_id ?? undefined,
           user_name: values.user_name,
           subject_preferences: values.subject_preferences ?? [],
+          excluded_subjects: values.excluded_subjects ?? [],
           departments: values.departments ?? [],
         });
       }
@@ -200,11 +204,18 @@ const AlertManagement: React.FC = () => {
     { title: 'Usuario (ID)', dataIndex: 'user_id', key: 'user_id', width: 90, render: (v: number) => v ?? '-' },
     { title: 'Nombre', dataIndex: 'user_name', key: 'user_name' },
     {
-      title: 'Materias',
+      title: 'Materias (quiero)',
       dataIndex: 'subject_preferences',
       key: 'subject_preferences',
       render: (arr: string[]) =>
-        Array.isArray(arr) ? arr.map((s) => <Tag key={s}>{s}</Tag>) : '-',
+        Array.isArray(arr) && arr.length ? arr.map((s) => <Tag key={s} color="blue">{s}</Tag>) : <span style={{ color: '#aaa' }}>Todas</span>,
+    },
+    {
+      title: 'Excluidas',
+      dataIndex: 'excluded_subjects',
+      key: 'excluded_subjects',
+      render: (arr: string[]) =>
+        Array.isArray(arr) && arr.length ? arr.map((s) => <Tag key={s} color="red">{s}</Tag>) : '-',
     },
     {
       title: 'Departamentos',
@@ -309,10 +320,23 @@ const AlertManagement: React.FC = () => {
           <Form.Item name="user_name" label="Nombre" rules={[{ required: true }]}>
             <Input placeholder="Nombre del usuario (se rellena al elegir usuario)" />
           </Form.Item>
-          <Form.Item name="subject_preferences" label="Materias de interés">
+          <Form.Item name="subject_preferences" label="Materias de interés (quiero recibir)">
             <Select
               mode="multiple"
-              placeholder="Seleccionar materias"
+              placeholder="Todas si no elegís ninguna"
+              allowClear
+              options={subjects?.map((s: any) => ({ label: s.name, value: s.name })) ?? []}
+            />
+          </Form.Item>
+          <Form.Item
+            name="excluded_subjects"
+            label="Materias excluidas (no quiero recibir)"
+            extra="Si un concurso tiene otras materias además de las excluidas, te llega igual sin ellas."
+          >
+            <Select
+              mode="multiple"
+              placeholder="Ninguna excluida"
+              allowClear
               options={subjects?.map((s: any) => ({ label: s.name, value: s.name })) ?? []}
             />
           </Form.Item>

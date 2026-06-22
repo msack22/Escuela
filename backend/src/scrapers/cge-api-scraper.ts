@@ -164,7 +164,7 @@ export class CgeApiUnavailableError extends Error {
   }
 }
 
-export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
+export async function runCgeApiScraper(prisma: PrismaClient): Promise<{ created: number; fetched: number }> {
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, "0");
@@ -476,7 +476,7 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<number> {
     await new Promise((r) => setTimeout(r, 300));
   }
 
-  appLogger.info("CGE API scraper finalizado", { created });
-  cgeScraperLogger.info("CGE API scraper → finalizado", { created });
-  return created;
+  appLogger.info("CGE API scraper finalizado", { created, fetched: allPosts.size });
+  cgeScraperLogger.info("CGE API scraper → finalizado", { created, fetched: allPosts.size });
+  return { created, fetched: allPosts.size };
 }

@@ -19,7 +19,7 @@ export async function runScraperBySource(
 
     appLogger.info("Scraping → running CGE API scraper (all)");
     try {
-      const apiCount = await runCgeApiScraper(prisma);
+      const { created: apiCount } = await runCgeApiScraper(prisma);
       total += apiCount;
       appLogger.info("Scraping → CGE API scraper finished", { apiCount });
     } catch (err) {
@@ -42,8 +42,8 @@ export async function runScraperBySource(
 
   if (source === "cge_api") {
     try {
-      const count = await runCgeApiScraper(prisma);
-      return { count, success: true };
+      const { created } = await runCgeApiScraper(prisma);
+      return { count: created, success: true };
     } catch (err) {
       if (err instanceof CgeApiUnavailableError) {
         appLogger.warn("Scraping → CGE API no disponible, usando fallback HTML scraper", { error: err.message });
@@ -249,10 +249,31 @@ export const scrapingRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // Health check: llama a la API del CGE y devuelve cuántos posts encontró sin guardar nada
+  app.get("/cge-health", async (_req, reply) => {
+    try {
+      const now = new Date();
+      const afterDate = new Date(now.getFullYear(), 0, 1).toISOString(); // desde el 1 ene del año actual
+      const beforeDate = new Date(now.getTime() + 86_400_000).toISOString(); // hasta mañana
+      const { data } = await (await import("axios")).default.get(
+        "https://cge.entrerios.gov.ar/wp-json/wp/v2/posts",
+        {
+          params: { per_page: 10, page: 1, after: afterDate, before: beforeDate, orderby: "date", order: "desc", _fields: "id,date,link,title" },
+          timeout: 15_000,
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; EscuelaCGEScraper/1.0)", "Accept": "application/json" },
+        }
+      );
+      const sample = Array.isArray(data) ? data.slice(0, 3).map((p: any) => ({ id: p.id, date: p.date, title: p.title?.rendered?.slice(0, 80) })) : [];
+      return { ok: true, posts_sample_count: Array.isArray(data) ? data.length : 0, sample, checked_at: now.toISOString() };
+    } catch (e) {
+      return reply.status(502).send({ ok: false, error: (e as Error).message, checked_at: new Date().toISOString() });
+    }
+  });
+
   app.post("/run-cge-simple", async (req, reply) => {
     try {
-      const count = await runCgeApiScraper(req.server.prisma);
-      return { message: "Scraping CGE Entre Ríos finalizado", total_contests: count, scraped_at: new Date().toISOString(), source: "cge_api", contests: [] };
+      const { created } = await runCgeApiScraper(req.server.prisma);
+      return { message: "Scraping CGE Entre Ríos finalizado", total_contests: created, scraped_at: new Date().toISOString(), source: "cge_api", contests: [] };
     } catch (e) {
       return reply.status(500).send({ detail: (e as Error).message });
     }
@@ -260,8 +281,8 @@ export const scrapingRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/run-cge-completo", async (req, reply) => {
     try {
-      const count = await runCgeApiScraper(req.server.prisma);
-      return { message: "Scraping CGE Entre Ríos finalizado", total_contests: count, scraped_at: new Date().toISOString(), source: "cge_api" };
+      const { created } = await runCgeApiScraper(req.server.prisma);
+      return { message: "Scraping CGE Entre Ríos finalizado", total_contests: created, scraped_at: new Date().toISOString(), source: "cge_api" };
     } catch (e) {
       return reply.status(500).send({ detail: (e as Error).message });
     }

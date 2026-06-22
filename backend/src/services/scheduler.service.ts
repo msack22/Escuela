@@ -139,6 +139,7 @@ export const schedulerService = {
       hour_ar: r.hour_ar,
       sources: r.sources.split(","),
       total_contests: r.total_contests,
+      fetched_total: (r as any).fetched_total ?? 0,
       cgeCount: r.cge_count,
       facebookCount: r.facebook_count,
     }));
@@ -184,12 +185,15 @@ setInterval(async () => {
   });
 
   try {
-    let apiCount = 0;
+    let apiCreated = 0;
+    let apiFetched = 0;
     let cgeCount = 0;
     let fbCount = 0;
 
     if (autoSources.includes("cge_api")) {
-      apiCount = await runCgeApiScraper(prisma);
+      const result = await runCgeApiScraper(prisma);
+      apiCreated = result.created;
+      apiFetched = result.fetched;
     }
     if (autoSources.includes("cge_simple") || autoSources.includes("cge_enterios_completo")) {
       cgeCount = await runCgeScraper(prisma);
@@ -198,7 +202,7 @@ setInterval(async () => {
       fbCount = await runFacebookCgeScraper(prisma);
     }
 
-    const total = apiCount + cgeCount + fbCount;
+    const total = apiCreated + cgeCount + fbCount;
 
     jobCount += 1;
     lastRun = startedAt.toISOString();
@@ -215,6 +219,7 @@ setInterval(async () => {
         total_contests: total,
         cge_count: cgeCount,
         facebook_count: fbCount,
+        fetched_total: apiFetched,
       },
     });
     const runInfo: SchedulerRunInfo = {

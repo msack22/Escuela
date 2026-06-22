@@ -25,6 +25,7 @@ export const alertsRoutes: FastifyPluginAsync = async (app) => {
       email_address?: string;
       whatsapp_number?: string;
       subject_preferences?: string | string[];
+      excluded_subjects?: string[];
       departments?: string[];
       max_distance_km?: number;
       notification_channels?: string;
@@ -51,12 +52,13 @@ export const alertsRoutes: FastifyPluginAsync = async (app) => {
 
     const prefs = body.subject_preferences;
     const departments = Array.isArray(body.departments) ? body.departments : [];
+    const excluded_subjects = Array.isArray(body.excluded_subjects) ? body.excluded_subjects : [];
     const subjectPreferences =
       typeof prefs === "string"
         ? prefs
         : Array.isArray(prefs)
-          ? JSON.stringify({ subjects: prefs, departments })
-          : JSON.stringify({ subjects: [], departments });
+          ? JSON.stringify({ subjects: prefs, departments, excluded_subjects })
+          : JSON.stringify({ subjects: [], departments, excluded_subjects });
     const alert = await req.server.prisma.alert.create({
       data: {
         user_id: body.user_id ?? null,
@@ -104,6 +106,7 @@ export const alertsRoutes: FastifyPluginAsync = async (app) => {
       email_address?: string | null;
       whatsapp_number?: string | null;
       subject_preferences?: string | string[] | null;
+      excluded_subjects?: string[] | null;
       departments?: string[] | null;
       max_distance_km?: number | null;
       notification_channels?: string | null;
@@ -117,15 +120,17 @@ export const alertsRoutes: FastifyPluginAsync = async (app) => {
 
     const prefs = body.subject_preferences;
     const departments = Array.isArray(body.departments) ? body.departments : undefined;
+    const excluded_subjects = Array.isArray(body.excluded_subjects) ? body.excluded_subjects : undefined;
     const subjectPreferences =
-      prefs == null && departments == null
+      prefs == null && departments == null && excluded_subjects == null
         ? undefined
         : (() => {
             if (typeof prefs === "string") return prefs;
-            if (Array.isArray(prefs) || Array.isArray(departments)) {
+            if (Array.isArray(prefs) || Array.isArray(departments) || Array.isArray(excluded_subjects)) {
               return JSON.stringify({
                 subjects: Array.isArray(prefs) ? prefs : [],
                 departments: Array.isArray(departments) ? departments : [],
+                excluded_subjects: Array.isArray(excluded_subjects) ? excluded_subjects : [],
               });
             }
             return undefined;
