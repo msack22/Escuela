@@ -4,7 +4,10 @@ import { runCgeScraper } from "../scrapers/cge-scraper.js";
 import { runFacebookCgeScraper } from "../scrapers/facebook-cge-scraper.js";
 import { runCgeApiScraper, CgeApiUnavailableError } from "../scrapers/cge-api-scraper.js";
 import { schedulerService } from "../services/scheduler.service.js";
-import { sendAutomaticContestNotifications } from "../services/alert-auto.service.js";
+import { sendAutomaticContestNotifications, sendMissedContestNotifications } from "../services/alert-auto.service.js";
+import { importPadronEscuelas, extractCueFromText, lookupCue, lookupByName } from "../services/padron-escuelas.service.js";
+import { extractContestFieldsFromText } from "../services/contest-text-parser.js";
+import { normalizeSubjectName, getItemType, getSubjectGroupName } from "../lib/subject-normalizer.js";
 import { appLogger } from "../lib/logger.js";
 
 export async function runScraperBySource(
@@ -286,5 +289,248 @@ export const scrapingRoutes: FastifyPluginAsync = async (app) => {
     } catch (e) {
       return reply.status(500).send({ detail: (e as Error).message });
     }
+  });
+
+  // Envía todos los concursos activos no notificados según los filtros de cada alerta
+  app.post("/notify-missed", async (req, reply) => {
+    try {
+      const result = await sendMissedContestNotifications(req.server.prisma);
+      return { success: true, ...result };
+    } catch (e) {
+      return reply.status(500).send({ success: false, error: (e as Error).message });
+    }
+  });
+
+  // Descarga e importa el padrón oficial de establecimientos educativos en la DB
+  app.post("/import-padron", async (req, reply) => {
+    const logs: string[] = [];
+    reply.send({ success: true, message: "Importando padrón en background, revisá los logs" });
+    importPadronEscuelas(req.server.prisma, (msg) => logs.push(msg))
+      .then((r) => appLogger.info("import-padron: completado", r))
+      .catch((err) => appLogger.error("import-padron: error", { error: (err as Error).message }));
+  });
+
+  // Re-procesa con regex + CUE lookup las escuelas sin departamento/ciudad y actualiza sus datos
+  app.post("/fix-missing-departments", async (req, reply) => {
+    const prisma = req.server.prisma;
+
+    // Detecta departamento a partir del texto de la descripción del concurso.
+    // Prioridad: patrones DDE/DRE explícitos → localidades → ciudades cabecera.
+    function detectDeptFromText(text: string): { department: string; city?: string } | null {
+      const DEPT_PATTERNS: Array<{ dept: string; city?: string; patterns: RegExp[] }> = [
+        { dept: "Paraná", city: "Paraná",       patterns: [/dptal\.?\s*pn[áa]\.?/i, /dde\s+paran[áa]\b/i, /d\.d\.e\.?\s*paran[áa]\b/i, /\bcrespo\b/i, /\bhasenkamp\b/i, /\bmar[ií]a\s+grande\b/i, /\bvill[ao]\s+libertad[oa]r\b.*san\s+mart[ií]n/i] },
+        { dept: "Concordia", city: "Concordia", patterns: [/dde\s+concordia\b/i, /d\.d\.e\.?\s*concordia\b/i, /[–\-]\s*concordia\b/i, /\bconcordia\b.*(?:concurs|llama|convoc)/i, /(?:concurs|llama|convoc).*\bconcordia\b/i, /\byeruá\b/i, /\bnu[eé]va\s+escocesa\b/i] },
+        { dept: "Federación", city: "Federación", patterns: [/dde\s+federaci[oó]n\b/i, /d\.d\.e\.?\s*federac\b/i, /\bchaj[aá]r[ií]\b/i, /\bsan\s+jaime\b/i, /\bsanta\s+ana\b.*entre\s+r[ií]os/i, /\bfederaci[oó]n\b.*(?:concurs|llama|convoc)/i] },
+        { dept: "Federal",     city: "Federal",   patterns: [/dde\s+federal\b/i, /d\.d\.e\.?\s*federal\b/i, /\bsauce\s+de\s+luna\b/i, /\bfederal\b.*(?:concurs|llama|convoc)/i] },
+        { dept: "Villaguay",   city: "Villaguay", patterns: [/dde\s+villaguay\b/i, /d\.d\.e\.?\s*villaguay\b/i, /\bvillaguay\b/i, /\baldea\s+san\s+antonio\b/i, /\bcuchilla\s+redonda\b/i, /\bberisso\b/i] },
+        { dept: "Colón",       city: "Colón",     patterns: [/dde\s+col[oó]n\b/i, /d\.d\.e\.?\s*col[oó]n\b/i, /\bvilla\s+elisa\b/i, /\bsan\s+jos[eé]\b.*entre\s+r[ií]os/i, /[–\-]\s*col[oó]n\b/i, /\bpuerto\s+yeru[aá]\b/i, /\blas\s+cuevas\b.*col[oó]n/i] },
+        { dept: "San Salvador", city: "San Salvador", patterns: [/san\s+salvador\b/i, /dde\s+san\s+salv/i, /\bgeneral\s+campos\b/i, /\bubajay\b/i, /\bsan\s+gustavo\b/i] },
+        { dept: "Gualeguay",   city: "Gualeguay", patterns: [/dde\s+gualeguay\b/i, /d\.d\.e\.?\s*gualeguay\b/i, /\burdinarrain\b/i, /\blarroque\b/i, /\bgualeguay\b.*(?:concurs|llama|convoc)/i] },
+        { dept: "Uruguay",     city: "Concepción del Uruguay", patterns: [/dde\s+uruguay\b/i, /d\.d\.e\.?\s*uruguay\b/i, /\bconcepci[oó]n\s+del\s+uruguay\b/i, /\bcolonia\s+el[ií]as\b/i, /\bcolonia\s+larroque\b/i] },
+        { dept: "La Paz",      city: "La Paz",    patterns: [/dde\s+la\s+paz\b/i, /d\.d\.e\.?\s*la\s+paz\b/i, /\bbovril\b/i, /\bsanta\s+elena\b.*entre\s+r[ií]os/i, /\bel\s+solar\b/i, /\bla\s+paz\b.*(?:concurs|llama|convoc)/i] },
+        { dept: "Nogoyá",      city: "Nogoyá",    patterns: [/dde\s+nogoy[aá]\b/i, /\bnogoy[aá]\b/i, /\baranguren\b/i, /\bvilla\s+hern[aá]ndez\b/i, /\bgeneral\s+alvear\b.*entre\s+r[ií]os/i] },
+        { dept: "Tala",        city: "Rosario del Tala", patterns: [/dde\s+tala\b/i, /d\.d\.e\.?\s*tala\b/i, /\brosario\s+del\s+tala\b/i, /\bmaci[aá]\b/i, /\bvilla\s+clara\b.*tala/i, /\bgobernador\s+mansilla\b/i] },
+        { dept: "Diamante",    city: "Diamante",  patterns: [/dde\s+diamante\b/i, /d\.d\.e\.?\s*diamante\b/i, /\bdiamante\b.*(?:concurs|llama|convoc)/i, /[–\-]\s*diamante\b/i] },
+        { dept: "Victoria",    city: "Victoria",  patterns: [/dde\s+victoria\b/i, /d\.d\.e\.?\s*victoria\b/i, /\bvictoria\b.*(?:concurs|llama|convoc)/i, /[–\-]\s*victoria\b/i] },
+        { dept: "Feliciano",   city: "San José de Feliciano", patterns: [/dde\s+feliciano\b/i, /d\.d\.e\.?\s*feliciano\b/i, /\bsan\s+jos[eé]\s+de\s+feliciano\b/i, /\bfeliciano\b/i] },
+        { dept: "Gualeguaychú", city: "Gualeguaychú", patterns: [/dde\s+gualeguaych[uú]\b/i, /d\.d\.e\.?\s*gualeguaych/i, /\bgualeguaych[uú]\b/i] },
+        { dept: "Islas del Ibicuy", city: "Villa Paranacito", patterns: [/dde\s+ibicuy\b/i, /\bislas\s+del\s+ibicuy\b/i, /\bvilla\s+paranacito\b/i, /\bibicuy\b/i, /\bceibas\b/i, /\bmazaruca\b/i] },
+      ];
+
+      for (const entry of DEPT_PATTERNS) {
+        if (entry.patterns.some((re) => re.test(text))) {
+          // Try to extract specific city from text (localidad de X)
+          const localidad = text.match(/localidad\s+de\s+([A-ZÁÉÍÓÚÑ][A-Za-záéíóúñüÁÉÍÓÚÑÜ\s.]+?)(?:[,\n\-–]|$)/)?.[1]?.trim();
+          return { department: entry.dept, city: localidad || entry.city };
+        }
+      }
+      return null;
+    }
+
+    const schools = await prisma.school.findMany({
+      where: { department: "Sin departamento" },
+      select: { id: true, name: true },
+    });
+
+    reply.send({ success: true, schools_to_process: schools.length, message: "Procesando en background, revisá los logs" });
+
+    (async () => {
+      let updated = 0, skipped = 0;
+
+      for (const school of schools) {
+        try {
+          const contest = await prisma.contest.findFirst({
+            where: { school_id: school.id, description: { not: null } },
+            select: { description: true, source_url: true },
+            orderBy: [{ id: "desc" }],
+          });
+          const content = contest?.description?.trim() ?? "";
+
+          const sourceUrl = contest?.source_url ?? "";
+
+          // 1) regex sobre la URL del post (keywords de departamento)
+          let detected = detectDeptFromText(sourceUrl.toLowerCase().replace(/-/g, " "));
+
+          // 2) regex sobre el texto de la descripción
+          if (!detected && content.length >= 30) detected = detectDeptFromText(content);
+
+          // 3) buscar CUE en el texto y consultar el padrón
+          if (!detected) {
+            const cue = content.length >= 5 ? extractCueFromText(content) : null;
+            if (cue) {
+              const padron = await lookupCue(prisma, cue);
+              if (padron) detected = { department: padron.departamento, city: padron.localidad };
+            }
+          }
+
+          // 4) buscar por nombre de escuela en el padrón (único match = seguro)
+          if (!detected) {
+            const padron = await lookupByName(prisma, school.name);
+            if (padron) detected = { department: padron.departamento, city: padron.localidad };
+          }
+
+          if (!detected) { skipped++; continue; }
+
+          await prisma.school.update({
+            where: { id: school.id },
+            data: { department: detected.department, city: detected.city ?? detected.department },
+          });
+          updated++;
+          appLogger.info("fix-missing-departments: escuela actualizada", { schoolId: school.id, name: school.name, ...detected });
+        } catch (err) {
+          appLogger.warn("fix-missing-departments: error en escuela", { schoolId: school.id, error: (err as Error).message });
+          skipped++;
+        }
+      }
+      appLogger.info("fix-missing-departments: completado", { total: schools.length, updated, skipped });
+    })().catch((err) => appLogger.error("fix-missing-departments: error general", { error: (err as Error).message }));
+  });
+
+  /**
+   * POST /api/scraping/reparse-items
+   * Re-extrae materias de los concursos con subject="General" o subjects mal parseados,
+   * usando la descripción almacenada en DB sin necesidad de re-scrapear URLs.
+   */
+  app.post("/reparse-items", async () => {
+    const prisma = app.prisma as PrismaClient;
+    // Procesar: subject="General" + subjects que parecen texto de contenido (no una materia real)
+    const allContests = await prisma.contest.findMany({
+      select: { id: true, title: true, description: true, subject: { select: { name: true } } },
+    });
+    const GARBAGE_PATTERN = /\b(solicitar[aá]|deber[aá]n|credencial|presentar(se)?|aspirante|establecimiento|instituc|convoc|matricul|concurso|ascenso|descenso|vacante|jubilaci[oó]n|reemplazo)\b|\d+o\d+o/i;
+    const contests = allContests.filter(c =>
+      c.subject.name === "General" ||
+      (c.subject.name.length > 40 && !normalizeSubjectName(c.subject.name)) ||
+      c.subject.name.includes(":") ||       // etiquetas tipo "CARGO O:" — no son materias
+      GARBAGE_PATTERN.test(c.subject.name)
+    );
+    appLogger.info("reparse-items: iniciando", { total: contests.length });
+
+    ;(async () => {
+      let updated = 0, skipped = 0;
+      for (const contest of contests) {
+        try {
+          if (!contest.description) { skipped++; continue; }
+
+          const fields = extractContestFieldsFromText({ title: contest.title, description: contest.description });
+          if (fields.items.length === 0 || (fields.items.length === 1 && !fields.items[0].subjectName)) {
+            skipped++;
+            continue;
+          }
+
+          // Upsert subjects y armar items resueltos
+          const resolvedItems: {
+            subjectId: number; subjectName: string; hoursToCover: number | null;
+            itemType: string; grade: string | null; llamado: string | null; caracter: string | null;
+          }[] = [];
+          for (const item of fields.items) {
+            const rawName = item.subjectName ?? "";
+            const normalized = normalizeSubjectName(rawName);
+            const name = (normalized ?? rawName.slice(0, 80)).trim();
+            // Descartar si el nombre tiene aspecto de texto-de-contenido y no es materia canónica.
+            const looksLikeGarbage = !normalized && (
+              rawName.length > 60 ||
+              GARBAGE_PATTERN.test(rawName) ||
+              rawName.includes(":") ||           // etiqueta tipo "CARGO O:" — no es materia
+              /^(cátedras?\s+|sección\s+)/i.test(rawName) ||
+              /\b([oó]rdenes?\s+de\s+m[eé]ritos?|ampliator)/i.test(rawName)
+            );
+            if (!name || name === "General" || looksLikeGarbage) { skipped++; continue; }
+            const normalizedGroup = getSubjectGroupName(name);
+            const upserted = await prisma.subject.upsert({
+              where: { name },
+              create: { name, normalized_name: normalizedGroup },
+              update: { normalized_name: normalizedGroup },
+            });
+            resolvedItems.push({
+              subjectId: upserted.id, subjectName: name,
+              hoursToCover: item.hoursToCover ?? null,
+              itemType: getItemType(name),
+              grade: item.grade?.slice(0, 80) ?? null,
+              llamado: item.llamado?.slice(0, 60) ?? null,
+              caracter: item.caracter?.slice(0, 100) ?? null,
+            });
+          }
+          if (resolvedItems.length === 0) {
+            // Si el subject actual es basura (tiene ":" o matchea GARBAGE_PATTERN),
+            // lo reseteamos a "General" para no seguir ciclando en futuros reparseos.
+            const currentSubject = contest.subject.name;
+            const isCurrentGarbage = currentSubject.includes(":") || GARBAGE_PATTERN.test(currentSubject);
+            if (isCurrentGarbage) {
+              const generalSubject = await prisma.subject.upsert({ where: { name: "General" }, create: { name: "General" }, update: {} });
+              await prisma.$transaction(async (tx) => {
+                await tx.contestItem.deleteMany({ where: { contest_id: contest.id } });
+                await tx.contest.update({ where: { id: contest.id }, data: { subject_id: generalSubject.id } });
+              });
+              appLogger.info("reparse-items: reseteado a General", { contestId: contest.id, prevSubject: currentSubject });
+            }
+            skipped++;
+            continue;
+          }
+
+          await prisma.$transaction(async (tx) => {
+            // Reemplazar items existentes
+            await tx.contestItem.deleteMany({ where: { contest_id: contest.id } });
+            await tx.contestItem.createMany({
+              data: resolvedItems.map((ri) => ({
+                contest_id: contest.id, subject_id: ri.subjectId,
+                hours_to_cover: ri.hoursToCover, grade: ri.grade,
+                llamado: ri.llamado, caracter: ri.caracter, item_type: ri.itemType,
+              })),
+            });
+            // Actualizar contest principal con el primer item
+            await tx.contest.update({
+              where: { id: contest.id },
+              data: { subject_id: resolvedItems[0].subjectId, hours_to_cover: resolvedItems[0].hoursToCover },
+            });
+          });
+          updated++;
+          appLogger.info("reparse-items: actualizado", { contestId: contest.id, items: resolvedItems.map(r => r.subjectName) });
+        } catch (err) {
+          appLogger.warn("reparse-items: error", { contestId: contest.id, error: (err as Error).message });
+          skipped++;
+        }
+      }
+      appLogger.info("reparse-items: completado", { total: contests.length, updated, skipped });
+    })().catch((err) => appLogger.error("reparse-items: error general", { error: (err as Error).message }));
+
+    return { success: true, queued: contests.length, message: "Re-parseo iniciado en background" };
+  });
+
+  /**
+   * POST /api/scraping/rebuild-normalized-names
+   * Recalcula normalized_name para todos los subjects según el mapeo actual.
+   */
+  app.post("/rebuild-normalized-names", async () => {
+    const prisma = app.prisma as PrismaClient;
+    const subjects = await prisma.subject.findMany({ select: { id: true, name: true } });
+    let updated = 0;
+    for (const s of subjects) {
+      const normalized = getSubjectGroupName(s.name);
+      await prisma.subject.update({ where: { id: s.id }, data: { normalized_name: normalized } });
+      updated++;
+    }
+    appLogger.info("rebuild-normalized-names: completado", { updated });
+    return { success: true, updated };
   });
 };

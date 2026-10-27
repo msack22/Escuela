@@ -1,9 +1,13 @@
 import { prisma } from "../db.js";
 import { runCgeScraper } from "../scrapers/cge-scraper.js";
 import { runFacebookCgeScraper } from "../scrapers/facebook-cge-scraper.js";
-import { runCgeApiScraper } from "../scrapers/cge-api-scraper.js";
+import { runCgeApiScraper, LEVELS_SKIP } from "../scrapers/cge-api-scraper.js";
 import { appLogger } from "../lib/logger.js";
 import { sendAutomaticContestNotifications } from "./alert-auto.service.js";
+import { sendDailyDigest } from "./digest.service.js";
+import { emailNotifier } from "../infrastructure/email-notifier.js";
+import { sendWhatsappMessage } from "../infrastructure/whatsapp-web-notifier.js";
+import { config, isEmailConfigured } from "../config.js";
 
 // Fuentes que el usuario puede elegir explícitamente desde el frontend.
 // "all" se maneja como valor implícito cuando no se envía ninguna fuente.
@@ -25,6 +29,34 @@ let cycleProgress: { running: boolean; step?: string; source?: string; percentag
 // Para evitar ejecuciones duplicadas dentro del mismo bloque horario.
 let lastScheduledSlotKey: string | null = null;
 let isJobExecuting = false;
+
+// Alerta al admin si el scraping automático falla varias veces seguidas (ej: caída de
+// internet/wifi del servidor, o la API de CGE caída por horas). Evita enterarse recién
+// varios días después de que dejaron de llegar concursos nuevos.
+const CONSECUTIVE_FAILURES_ALERT_THRESHOLD = 2;
+const FAILURE_ALERT_COOLDOWN_MS = 3 * 60 * 60 * 1000; // no repetir la alerta antes de 3hs
+let consecutiveScrapingFailures = 0;
+let lastFailureAlertAt = 0;
+
+async function alertAdminScrapingFailing(errorMsg: string, failureCount: number) {
+  const to = config.ADMIN_EMAIL;
+  const whatsapp = config.ADMIN_WHATSAPP;
+  const subject = `⚠️ Scraping de concursos falla hace ${failureCount} corridas seguidas`;
+  const text = `El scraping automático de concursos (Escuela) lleva ${failureCount} corridas seguidas fallando.\n\nÚltimo error: ${errorMsg}\n\nRevisar conectividad del servidor o si la API del CGE está caída.`;
+  try {
+    if (to && isEmailConfigured()) {
+      await emailNotifier.send({ to, subject, html: `<p>${text.replace(/\n/g, "<br/>")}</p>` });
+    }
+    if (whatsapp) {
+      await sendWhatsappMessage(whatsapp, `🔴 ${subject}\n\n${text}`);
+    }
+    appLogger.info("Scheduler → alerta de scraping caído enviada al admin", { failureCount });
+  } catch (err) {
+    appLogger.error("Scheduler → no se pudo enviar alerta de scraping caído", {
+      error: (err as Error)?.message ?? String(err),
+    });
+  }
+}
 
 type SchedulerRunInfo = {
   started_at: string;
@@ -133,6 +165,7 @@ export const schedulerService = {
       take: limit,
     });
     return rows.map((r) => ({
+      id: r.id,
       started_at: r.started_at.toISOString(),
       finished_at: r.finished_at.toISOString(),
       timezone: r.timezone,
@@ -143,6 +176,50 @@ export const schedulerService = {
       cgeCount: r.cge_count,
       facebookCount: r.facebook_count,
     }));
+  },
+  // Desglose por motivo de descarte de una corrida puntual: permite ver, para
+  // una fila del historial, qué concursos se filtraron y por qué (incluye los
+  // descartes por palabra clave de nivel, que no se reflejan en fetched_total).
+  async getRunDiscardedBreakdown(runId: number) {
+    const run = await prisma.schedulerRun.findUnique({ where: { id: runId } });
+    if (!run) return null;
+
+    const posts = await prisma.discardedPost.findMany({
+      where: { scheduler_run_id: runId },
+      orderBy: { discarded_at: "asc" },
+    });
+
+    const byReason = new Map<string, typeof posts>();
+    for (const p of posts) {
+      const arr = byReason.get(p.reason) ?? [];
+      arr.push(p);
+      byReason.set(p.reason, arr);
+    }
+
+    return {
+      run: {
+        id: run.id,
+        started_at: run.started_at.toISOString(),
+        finished_at: run.finished_at.toISOString(),
+        hour_ar: run.hour_ar,
+        sources: run.sources.split(","),
+        fetched_total: run.fetched_total,
+        total_contests: run.total_contests,
+      },
+      excluded_levels: [...LEVELS_SKIP],
+      groups: [...byReason.entries()].map(([reason, items]) => ({
+        reason,
+        count: items.length,
+        items: items.map((i) => ({
+          id: i.id,
+          title: i.title,
+          url: i.url,
+          keyword_matched: i.keyword_matched,
+          post_date: i.post_date ? i.post_date.toISOString() : null,
+          discarded_at: i.discarded_at.toISOString(),
+        })),
+      })),
+    };
   },
 };
 
@@ -184,6 +261,19 @@ setInterval(async () => {
     sources: autoSources,
   });
 
+  // Se crea la fila ANTES de correr los scrapers (con finished_at como
+  // placeholder) para tener el id disponible y poder linkear cada
+  // discarded_post a la corrida que lo generó.
+  const schedulerRun = await prisma.schedulerRun.create({
+    data: {
+      started_at: startedAt,
+      finished_at: startedAt,
+      timezone: TIMEZONE,
+      hour_ar: currentHourAr,
+      sources: autoSources.join(","),
+    },
+  });
+
   try {
     let apiCreated = 0;
     let apiFetched = 0;
@@ -191,7 +281,7 @@ setInterval(async () => {
     let fbCount = 0;
 
     if (autoSources.includes("cge_api")) {
-      const result = await runCgeApiScraper(prisma);
+      const result = await runCgeApiScraper(prisma, schedulerRun.id);
       apiCreated = result.created;
       apiFetched = result.fetched;
     }
@@ -209,13 +299,10 @@ setInterval(async () => {
     nextRun = computeNextRun(startedAt);
 
     const finishedAt = new Date();
-    await prisma.schedulerRun.create({
+    await prisma.schedulerRun.update({
+      where: { id: schedulerRun.id },
       data: {
-        started_at: startedAt,
         finished_at: finishedAt,
-        timezone: TIMEZONE,
-        hour_ar: currentHourAr,
-        sources: autoSources.join(","),
         total_contests: total,
         cge_count: cgeCount,
         facebook_count: fbCount,
@@ -258,12 +345,43 @@ setInterval(async () => {
       runInfo,
       notifications: notifSummary,
     });
+    consecutiveScrapingFailures = 0;
   } catch (err) {
-    appLogger.error("Scheduler → automatic scraping cycle failed", {
-      error: (err as Error)?.message ?? String(err),
-    });
+    const errorMsg = (err as Error)?.message ?? String(err);
+    appLogger.error("Scheduler → automatic scraping cycle failed", { error: errorMsg });
+    consecutiveScrapingFailures++;
+    const now = Date.now();
+    if (
+      consecutiveScrapingFailures >= CONSECUTIVE_FAILURES_ALERT_THRESHOLD &&
+      now - lastFailureAlertAt > FAILURE_ALERT_COOLDOWN_MS
+    ) {
+      lastFailureAlertAt = now;
+      await alertAdminScrapingFailing(errorMsg, consecutiveScrapingFailures);
+    }
   } finally {
     schedulerService.setCycleProgress({ running: false });
     isJobExecuting = false;
+  }
+}, 60_000);
+
+// Digest diario: se ejecuta una vez al día a las 7 hs AR.
+const DIGEST_HOUR_AR = 7;
+let lastDigestDateKey: string | null = null;
+
+setInterval(async () => {
+  if (!isRunning) return;
+  const now = new Date();
+  const { dateKey, hour } = getArgentinaLocalParts(now);
+  if (hour !== DIGEST_HOUR_AR) return;
+  if (now.getMinutes() > 5) return;
+  const digestSlot = `digest-${dateKey}`;
+  if (digestSlot === lastDigestDateKey) return;
+  lastDigestDateKey = digestSlot;
+  appLogger.info("Scheduler → ejecutando digest diario", { dateKey, hour });
+  try {
+    const result = await sendDailyDigest(prisma);
+    appLogger.info("Scheduler → digest diario finalizado", result);
+  } catch (err) {
+    appLogger.error("Scheduler → error en digest diario", { error: (err as Error)?.message ?? String(err) });
   }
 }, 60_000);

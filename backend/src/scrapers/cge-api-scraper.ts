@@ -5,7 +5,22 @@ import {
   extractContestFieldsFromText,
   enrichContestFieldsWithAI,
 } from "../services/contest-text-parser.js";
-import { normalizeSubjectName, getItemType } from "../lib/subject-normalizer.js";
+import { normalizeSubjectName, getItemType, getSubjectGroupName } from "../lib/subject-normalizer.js";
+import { config, isEmailConfigured } from "../config.js";
+import { emailNotifier } from "../infrastructure/email-notifier.js";
+import { sendWhatsappMessage } from "../infrastructure/whatsapp-web-notifier.js";
+
+async function notifyAdminCgeError(errorMsg: string): Promise<void> {
+  const subject = "⚠️ Error en la API del CGE Entre Ríos";
+  const body = `El scraper de concursos detectó un error al consultar la API del CGE:\n\n${errorMsg}\n\nFecha: ${new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })}`;
+  const html = `<p><strong>El scraper de concursos detectó un error al consultar la API del CGE:</strong></p><p>${errorMsg}</p><p>Fecha: ${new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })}</p>`;
+  if (config.ADMIN_EMAIL && isEmailConfigured()) {
+    await emailNotifier.send({ to: config.ADMIN_EMAIL, subject, html }).catch(() => {});
+  }
+  if (config.ADMIN_WHATSAPP) {
+    await sendWhatsappMessage(config.ADMIN_WHATSAPP, `${subject}\n\n${body}`).catch(() => {});
+  }
+}
 
 const SOURCE_NAME = "CGE Entre Ríos API";
 const WP_API = "https://cge.entrerios.gov.ar/wp-json/wp/v2/posts";
@@ -22,6 +37,17 @@ const LEVEL_CATEGORIES: Array<{ id: number; level: string }> = [
   { id: 208, level: "Supervisor" },
 ];
 
+/** Categorías de nivel que nunca se piden a la API (exclusión de diseño, no hay post individual). */
+export const LEVELS_SKIP: readonly string[] = ["Primaria", "Inicial"];
+
+/**
+ * Palabras clave que identifican niveles que no nos interesan (Primaria / Inicial).
+ * Se aplican al título del post del catch-all, donde no hay categoría de nivel.
+ */
+export const SKIP_LEVEL_KEYWORDS: readonly string[] = [
+  "primaria", "nivel primario", "nivel inicial", "inicial", "jardín", "jardin", "jardines",
+];
+
 /**
  * Departamentos y keywords para detectar departamento a partir de la URL del post.
  * Orden importa: gualeguaychu antes que gualeguay para evitar falsos positivos.
@@ -29,27 +55,110 @@ const LEVEL_CATEGORIES: Array<{ id: number; level: string }> = [
 const DEPARTMENT_CONFIGS: Array<{
   slug: string;
   name: string;
-  keywords: string[];
+  keywords: string[];   // keywords en la URL del post (en minúsculas, sin acentos)
+  textPatterns?: RegExp[]; // patrones en el texto del contenido del post
 }> = [
   {
     slug: "islas-del-ibicuy",
     name: "Islas del Ibicuy",
     keywords: ["ibicuy", "ceibas", "paranacito", "mazaruca", "giorgi", "islas-del-ibicuy", "nep-nina"],
+    textPatterns: [/\bibicuy\b/i, /\bvilla\s+paranacito\b/i, /\bceibas\b/i, /\bmazaruca\b/i, /dde\s+ibicuy/i],
   },
   {
     slug: "gualeguaychu",
     name: "Gualeguaychú",
     keywords: ["gualeguaychu"],
+    textPatterns: [/\bgualeguaych[uú]\b/i, /dde\s+gualeguaych/i],
   },
   {
     slug: "gualeguay",
     name: "Gualeguay",
     keywords: ["gualeguay"],
+    textPatterns: [/\bgualeguay\b/i, /dde\s+gualeguay\b/i, /\burdinarrain\b/i, /\blarroque\b/i],
   },
   {
     slug: "uruguay",
     name: "Uruguay",
     keywords: ["concepcion-del-uruguay", "colonia-elias", "colonia-larroque", "dde-uruguay"],
+    textPatterns: [/\bconcepci[oó]n\s+del\s+uruguay\b/i, /dde\s+uruguay\b/i, /d\.d\.e\.?\s*uruguay\b/i, /\bcolonia\s+el[ií]as\b/i],
+  },
+  {
+    slug: "parana",
+    name: "Paraná",
+    keywords: ["dptal-pna", "dde-parana", "dptal-parana", "crespo", "hasenkamp", "maria-grande"],
+    textPatterns: [/dptal\.?\s*pn[áa]\.?/i, /dde\s+paran[áa]\b/i, /d\.d\.e\.?\s*paran[áa]\b/i, /\bcrespo\b/i, /\bhasenkamp\b/i, /\bmar[ií]a\s+grande\b/i],
+  },
+  {
+    slug: "concordia",
+    name: "Concordia",
+    keywords: ["concordia", "dde-concordia", "yeruá", "nueva-escocesa"],
+    textPatterns: [/dde\s+concordia\b/i, /d\.d\.e\.?\s*concordia\b/i, /[–\-]\s*concordia\b/i, /\bconcordia\b.*(?:concurs|llama|convoc)/i, /\byeruá\b/i, /\bnueva\s+escocesa\b/i],
+  },
+  {
+    slug: "federacion",
+    name: "Federación",
+    keywords: ["chajairi", "chajar", "san-jaime", "dde-federacion", "nueva-escocesa-2"],
+    textPatterns: [/dde\s+federaci[oó]n\b/i, /d\.d\.e\.?\s*federac\b/i, /\bchaj[aá]r[ií]\b/i, /\bsan\s+jaime\b/i],
+  },
+  {
+    slug: "federal",
+    name: "Federal",
+    keywords: ["dde-federal", "sauce-de-luna"],
+    textPatterns: [/dde\s+federal\b/i, /d\.d\.e\.?\s*federal\b/i, /\bsauce\s+de\s+luna\b/i],
+  },
+  {
+    slug: "villaguay",
+    name: "Villaguay",
+    keywords: ["villaguay", "dde-villaguay", "aldea-san-antonio"],
+    textPatterns: [/dde\s+villaguay\b/i, /d\.d\.e\.?\s*villaguay\b/i, /\bvillaguay\b/i, /\baldea\s+san\s+antonio\b/i],
+  },
+  {
+    slug: "colon",
+    name: "Colón",
+    keywords: ["dde-colon", "villa-elisa", "puerto-yeruá", "san-jose-entre-rios"],
+    textPatterns: [/dde\s+col[oó]n\b/i, /d\.d\.e\.?\s*col[oó]n\b/i, /\bvilla\s+elisa\b/i, /\bpuerto\s+yeru[aá]\b/i, /[–\-]\s*col[oó]n\b/i],
+  },
+  {
+    slug: "san-salvador",
+    name: "San Salvador",
+    keywords: ["san-salvador", "general-campos", "ubajay", "san-gustavo"],
+    textPatterns: [/\bsan\s+salvador\b/i, /dde\s+san\s+salv/i, /\bgeneral\s+campos\b/i, /\bubajay\b/i, /\bsan\s+gustavo\b/i],
+  },
+  {
+    slug: "la-paz",
+    name: "La Paz",
+    keywords: ["dde-la-paz", "bovril", "santa-elena-entre-rios", "el-solar"],
+    textPatterns: [/dde\s+la\s+paz\b/i, /d\.d\.e\.?\s*la\s+paz\b/i, /\bbovril\b/i, /\bsanta\s+elena\b.*entre\s+r[ií]os/i, /\bel\s+solar\b/i],
+  },
+  {
+    slug: "nogoya",
+    name: "Nogoyá",
+    keywords: ["nogoya", "dde-nogoya", "aranguren", "villa-hernandez"],
+    textPatterns: [/dde\s+nogoy[aá]\b/i, /\bnogoy[aá]\b/i, /\baranguren\b/i, /\bvilla\s+hern[aá]ndez\b/i],
+  },
+  {
+    slug: "tala",
+    name: "Tala",
+    keywords: ["rosario-del-tala", "dde-tala", "macia", "villa-clara", "gobernador-mansilla"],
+    textPatterns: [/dde\s+tala\b/i, /d\.d\.e\.?\s*tala\b/i, /\brosario\s+del\s+tala\b/i, /\bmaci[aá]\b/i, /\bgobernador\s+mansilla\b/i],
+  },
+  {
+    slug: "diamante",
+    name: "Diamante",
+    keywords: ["dde-diamante"],
+    textPatterns: [/dde\s+diamante\b/i, /d\.d\.e\.?\s*diamante\b/i, /[–\-]\s*diamante\b/i],
+  },
+  {
+    slug: "victoria",
+    name: "Victoria",
+    keywords: ["dde-victoria"],
+    textPatterns: [/dde\s+victoria\b/i, /d\.d\.e\.?\s*victoria\b/i, /[–\-]\s*victoria\b/i],
+  },
+  {
+    slug: "feliciano",
+    name: "Feliciano",
+    keywords: ["feliciano", "san-jose-de-feliciano"],
+    textPatterns: [/dde\s+feliciano\b/i, /d\.d\.e\.?\s*feliciano\b/i, /\bsan\s+jos[eé]\s+de\s+feliciano\b/i],
   },
 ];
 
@@ -84,7 +193,14 @@ function htmlToText(html: string): string {
       // Resto de entidades numéricas → espacio para no romper el texto
       return " ";
     })
-    .replace(/\s{2,}/g, " ")
+    // Colapsar espacios/tabs repetidos SIN tocar los \n (que marcan párrafos).
+    // Antes esto era `.replace(/\s{2,}/g, " ")`, que también colapsaba \n adyacentes
+    // a espacios (típico en HTML indentado) y fusionaba todos los párrafos en una
+    // sola línea, rompiendo el parseo por línea de extractContestFieldsFromText.
+    .split("\n")
+    .map((line) => line.replace(/[ \t]{2,}/g, " ").trim())
+    .filter(Boolean)
+    .join("\n")
     .trim();
 }
 
@@ -93,6 +209,16 @@ function detectDepartment(url: string): { slug: string; name: string } | null {
   const lower = url.toLowerCase();
   for (const dep of DEPARTMENT_CONFIGS) {
     if (dep.keywords.some((kw) => lower.includes(kw))) {
+      return { slug: dep.slug, name: dep.name };
+    }
+  }
+  return null;
+}
+
+/** Detecta el departamento a partir del contenido de texto del post (fallback cuando la URL no tiene keywords). */
+function detectDepartmentFromContent(text: string): { slug: string; name: string } | null {
+  for (const dep of DEPARTMENT_CONFIGS) {
+    if (dep.textPatterns?.some((re) => re.test(text))) {
       return { slug: dep.slug, name: dep.name };
     }
   }
@@ -136,7 +262,7 @@ async function fetchPostsByCategory(
         params,
         timeout: 25_000,
         headers: {
-          "User-Agent": "Mozilla/5.0 (compatible; EscuelaCGEScraper/1.0)",
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
           "Accept": "application/json",
         },
       });
@@ -149,8 +275,10 @@ async function fetchPostsByCategory(
       const status = (err as { response?: { status?: number } })?.response?.status;
       // WordPress devuelve 400 si el parámetro `page` excede el total de páginas
       if (status === 400) break;
-      // Cualquier otro error (500, timeout, red) indica API no disponible
-      throw err;
+      // Enriquecer el error con el status HTTP para que el caller pueda loguear el código
+      const enriched = new Error(`HTTP ${status ?? "sin respuesta"}: ${(err as Error).message}`);
+      (enriched as { httpStatus?: number }).httpStatus = status;
+      throw enriched;
     }
   }
 
@@ -164,25 +292,27 @@ export class CgeApiUnavailableError extends Error {
   }
 }
 
-export async function runCgeApiScraper(prisma: PrismaClient): Promise<{ created: number; fetched: number }> {
+export async function runCgeApiScraper(
+  prisma: PrismaClient,
+  schedulerRunId?: number,
+): Promise<{ created: number; fetched: number }> {
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, "0");
 
-  // Ventana: desde hace 3 días (00:00:00) hasta el momento actual
-  const threeDaysAgo = new Date(now);
-  threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
-  threeDaysAgo.setHours(0, 0, 0, 0);
-  const afterDate = threeDaysAgo.toISOString().slice(0, 19);
+  // Ventana: últimos 10 días (00:00:00 hasta ahora)
+  const tenDaysAgo = new Date(now);
+  tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+  tenDaysAgo.setHours(0, 0, 0, 0);
+  const afterDate = tenDaysAgo.toISOString().slice(0, 19);
   const beforeDate = now.toISOString().slice(0, 19);
 
   appLogger.info("Iniciando CGE API scraper", { afterDate, beforeDate });
   cgeScraperLogger.info("CGE API scraper → inicio", { afterDate, beforeDate });
 
-  // Obtener URLs ya guardadas este mes para este source (evita re-procesar)
-  const startOfMonth = new Date(year, now.getMonth(), 1);
+  // Obtener URLs ya guardadas en los últimos 30 días (misma ventana que el scraper)
   const existingContests = await prisma.contest.findMany({
-    where: { source_name: SOURCE_NAME, created_at: { gte: startOfMonth } },
+    where: { source_name: SOURCE_NAME, created_at: { gte: tenDaysAgo } },
     select: { source_url: true },
   });
   const existingUrlSet = new Set(
@@ -195,8 +325,8 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<{ created:
   // También considerar URLs ya guardadas por los scrapers anteriores (evita duplicados entre sources)
   const existingAllSources = await prisma.contest.findMany({
     where: {
-      created_at: { gte: startOfMonth },
-      source_url: { contains: `cge.entrerios.gov.ar/${year}/${month}/` },
+      created_at: { gte: tenDaysAgo },
+      source_url: { contains: "cge.entrerios.gov.ar/" },
     },
     select: { source_url: true },
   });
@@ -207,12 +337,12 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<{ created:
   // Recolectar todos los posts del mes agrupados por nivel
   const allPosts = new Map<string, WpPost>(); // key = URL normalizada
 
-  const LEVELS_SKIP = new Set(["Primaria", "Inicial"]);
+  const levelsSkipSet = new Set(LEVELS_SKIP);
   let apiSuccessCount = 0;
   let apiErrorCount = 0;
 
   for (const levelCat of LEVEL_CATEGORIES) {
-    if (LEVELS_SKIP.has(levelCat.level)) {
+    if (levelsSkipSet.has(levelCat.level)) {
       cgeScraperLogger.info("CGE API scraper → nivel excluido, se omite", { level: levelCat.level });
       continue;
     }
@@ -228,8 +358,10 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<{ created:
       apiSuccessCount++;
     } catch (err) {
       apiErrorCount++;
+      const httpStatus = (err as { httpStatus?: number }).httpStatus;
       cgeScraperLogger.warn("CGE API scraper → error al obtener categoría", {
         level: levelCat.level,
+        httpStatus,
         error: (err as Error)?.message ?? String(err),
       });
       await new Promise((r) => setTimeout(r, 500));
@@ -245,11 +377,6 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<{ created:
     for (const post of posts) {
       const normalized = (post.link ?? "").replace(/\/$/, "");
       if (!normalized || allPosts.has(normalized)) continue;
-
-      // Solo nos interesan posts de los departamentos configurados
-      const dep = detectDepartment(normalized);
-      if (!dep) continue;
-
       allPosts.set(normalized, post);
     }
 
@@ -257,11 +384,6 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<{ created:
     await new Promise((r) => setTimeout(r, 500));
   }
 
-  // Palabras clave que identifican niveles que no nos interesan (Primaria / Inicial).
-  // Se aplican al título del post del catch-all, donde no hay categoría de nivel.
-  const SKIP_LEVEL_KEYWORDS = [
-    "primaria", "nivel primario", "nivel inicial", "inicial", "jardín", "jardin", "jardines",
-  ];
   function isCatchAllPostSkipped(post: WpPost): boolean {
     const title = htmlToText(post.title?.rendered ?? "").toLowerCase();
     return SKIP_LEVEL_KEYWORDS.some((kw) => title.includes(kw));
@@ -278,8 +400,6 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<{ created:
     for (const post of extraPosts) {
       const normalized = (post.link ?? "").replace(/\/$/, "");
       if (!normalized || allPosts.has(normalized)) continue;
-      const dep = detectDepartment(normalized);
-      if (!dep) continue;
       if (isCatchAllPostSkipped(post)) {
         const title = htmlToText(post.title?.rendered ?? "").toLowerCase();
         const matched = SKIP_LEVEL_KEYWORDS.find((kw) => title.includes(kw));
@@ -296,6 +416,7 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<{ created:
             reason: "level_keyword",
             keyword_matched: matched ?? null,
             post_date: post.date ? new Date(post.date) : null,
+            scheduler_run_id: schedulerRunId ?? null,
           }],
           skipDuplicates: true,
         }).catch(() => {
@@ -313,10 +434,12 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<{ created:
     });
   }
 
-  // Si todas las categorías fallaron, la API está caída — lanzamos para activar fallback
+  // Si todas las categorías fallaron, la API está caída — notificamos y lanzamos para activar fallback
   if (apiSuccessCount === 0 && apiErrorCount > 0) {
+    const errMsg = `La API del CGE (${WP_API}) no respondió correctamente en ninguna de las ${apiErrorCount} categorías consultadas. Posible 503 u otro error de servidor.`;
     cgeScraperLogger.warn("CGE API scraper → todas las categorías fallaron, API no disponible", { apiErrorCount });
-    throw new CgeApiUnavailableError("CGE WordPress API no disponible (todas las categorías devolvieron error)");
+    await notifyAdminCgeError(errMsg);
+    throw new CgeApiUnavailableError(errMsg);
   }
 
   cgeScraperLogger.info("CGE API scraper → posts relevantes encontrados", {
@@ -344,15 +467,42 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<{ created:
   for (const [normalizedUrl, post] of allPosts.entries()) {
     if (existingUrlSet.has(normalizedUrl)) {
       cgeScraperLogger.info("CGE API scraper → ya existe, se omite", { url: normalizedUrl });
+      await prisma.discardedPost.create({
+        data: {
+          source_name: SOURCE_NAME,
+          url: normalizedUrl,
+          title: post.title?.rendered ?? "",
+          reason: "duplicate_url",
+          keyword_matched: null,
+          post_date: post.date ? new Date(post.date) : null,
+          scheduler_run_id: schedulerRunId ?? null,
+        },
+      }).catch(() => {
+        // Si falla (ej. url muy larga) seguimos sin interrumpir el scraping
+      });
       continue;
     }
-
-    const dep = detectDepartment(normalizedUrl)!;
-    const levelFromCat = detectLevel(post.categories);
 
     const titleText = htmlToText(post.title?.rendered ?? "");
     const contentText = htmlToText(post.content?.rendered ?? "");
     const fullText = [titleText, contentText].filter(Boolean).join("\n\n");
+
+    const levelFromCat = detectLevel(post.categories);
+    let dep = detectDepartment(normalizedUrl) ?? detectDepartmentFromContent(fullText);
+
+    // Tercer fallback: buscar CUE en el texto y consultar el padrón oficial
+    if (!dep) {
+      const { extractCueFromText, lookupCue } = await import("../services/padron-escuelas.service.js");
+      const cue = extractCueFromText(fullText);
+      if (cue) {
+        const padron = await lookupCue(prisma, cue);
+        if (padron) {
+          dep = { slug: padron.departamento.toLowerCase().replace(/\s+/g, "-").replace(/[áä]/g,"a").replace(/[éë]/g,"e").replace(/[íï]/g,"i").replace(/[óö]/g,"o").replace(/[úü]/g,"u"), name: padron.departamento };
+        }
+      }
+    }
+
+    dep = dep ?? { slug: "sin-departamento", name: "Sin departamento" };
 
     cgeScraperLogger.info("CGE API scraper → procesando post", {
       url: normalizedUrl,
@@ -370,27 +520,52 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<{ created:
       fallbackLevel: levelFromCat ?? undefined,
     });
 
-    // Enriquecer con AI para mejor extracción de materia, turno, horas, etc.
-    const structured = await enrichContestFieldsWithAI(regexFields, fullText);
+    // Enriquecer con AI solo cuando algún item del regex no mapea a materia conocida.
+    // Si todos normalizan, el regex fue suficiente y ahorramos créditos de la API.
+    const allItemsKnown = regexFields.items.length > 0 &&
+      regexFields.items.every((item) => item.subjectName && normalizeSubjectName(item.subjectName) !== undefined);
+    const structured = allItemsKnown
+      ? regexFields
+      : await enrichContestFieldsWithAI(regexFields, fullText);
 
     // publication_date: siempre la fecha real del post en la API de WordPress
     const publicationDate = publishedAt;
     // contest_date: fecha del concurso extraída del contenido del post; si no se encuentra, usamos publication_date como fallback
     const contestDate = structured.contestDate ?? publicationDate;
 
-    // Resolver o crear departamento (cache: evita query por post)
-    const canonicalName = dep.name;
-    let departmentEntry = departmentCache.get(dep.slug) ?? departmentCache.get(canonicalName);
+    // Resolver o crear departamento: preferir el departamento extraído por la IA sobre el detectado por URL
+    const aiDeptName = structured.department?.trim();
+    let resolvedDep = dep; // fallback: lo detectado por URL (puede ser "Sin departamento")
+    if (aiDeptName) {
+      const aiSlug = aiDeptName.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, "-");
+      const cached = departmentCache.get(aiSlug) ?? departmentCache.get(aiDeptName);
+      if (cached) {
+        resolvedDep = { slug: aiSlug, name: cached.name };
+      } else {
+        // Buscar en BD por nombre (fuzzy: contains)
+        const found = await prisma.department.findFirst({ where: { name: { contains: aiDeptName } } });
+        if (found) {
+          resolvedDep = { slug: found.name.toLowerCase().replace(/\s+/g, "-"), name: found.name };
+          departmentCache.set(resolvedDep.slug, { id: found.id, name: found.name });
+          departmentCache.set(found.name, { id: found.id, name: found.name });
+        } else {
+          resolvedDep = { slug: aiSlug, name: aiDeptName };
+        }
+      }
+    }
+
+    const canonicalName = resolvedDep.name;
+    let departmentEntry = departmentCache.get(resolvedDep.slug) ?? departmentCache.get(canonicalName);
     if (!departmentEntry) {
-      const created = await prisma.department.create({ data: { name: canonicalName, slug: dep.slug } });
+      const created = await prisma.department.create({ data: { name: canonicalName, slug: resolvedDep.slug } });
       departmentEntry = { id: created.id, name: created.name };
-      departmentCache.set(dep.slug, departmentEntry);
+      departmentCache.set(resolvedDep.slug, departmentEntry);
       departmentCache.set(canonicalName, departmentEntry);
     }
     const department = departmentEntry;
 
-    // Resolver o crear escuela: usamos el nombre extraído por la IA si está disponible,
-    // de lo contrario usamos un placeholder con el nombre del departamento.
+    // Resolver o crear escuela: usamos nombre de la IA si está disponible, y ciudad de la IA.
+    const aiCity = structured.city?.trim() || canonicalName;
     const schoolName = structured.schoolName?.trim().slice(0, 255) || `CGE ${canonicalName}`;
     let school = await prisma.school.findFirst({
       where: { name: schoolName, department_id: department.id },
@@ -399,24 +574,42 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<{ created:
       school = await prisma.school.create({
         data: {
           name: schoolName,
-          city: canonicalName,
+          city: aiCity,
           department: canonicalName,
           department_id: department.id,
         },
       });
+    } else if (school.city === canonicalName && aiCity !== canonicalName) {
+      // Si la escuela ya existía con ciudad = departamento (fallback), actualizar con la ciudad real
+      await prisma.school.update({ where: { id: school.id }, data: { city: aiCity } });
     }
 
     // Resolver subjects para todos los items extraídos (cache: evita query por item)
-    const resolvedItems: { subjectName: string; subjectId: number; hoursToCover: number | null; itemType: string }[] = [];
+    const resolvedItems: {
+      subjectName: string; subjectId: number; hoursToCover: number | null;
+      itemType: string; grade: string | null; llamado: string | null; caracter: string | null;
+    }[] = [];
     for (const item of structured.items) {
       const subjectName = (normalizeSubjectName(item.subjectName) ?? item.subjectName ?? "General").slice(0, 255);
       let subjectId = subjectCache.get(subjectName);
       if (subjectId === undefined) {
-        const created = await prisma.subject.create({ data: { name: subjectName } });
-        subjectId = created.id;
+        const normalizedGroup = getSubjectGroupName(subjectName).slice(0, 100);
+        const upserted = await prisma.subject.upsert({
+          where: { name: subjectName },
+          create: { name: subjectName, normalized_name: normalizedGroup },
+          update: { normalized_name: normalizedGroup },
+        });
+        subjectId = upserted.id;
         subjectCache.set(subjectName, subjectId);
       }
-      resolvedItems.push({ subjectName, subjectId, hoursToCover: item.hoursToCover ?? null, itemType: getItemType(subjectName) });
+      resolvedItems.push({
+        subjectName, subjectId,
+        hoursToCover: item.hoursToCover ?? null,
+        itemType: getItemType(subjectName),
+        grade: item.grade?.slice(0, 80) ?? null,
+        llamado: item.llamado?.slice(0, 60) ?? null,
+        caracter: item.caracter?.slice(0, 100) ?? null,
+      });
     }
 
     // Fallback si la extracción no encontró ningún item
@@ -424,15 +617,40 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<{ created:
       const fallbackName = "General";
       let subjectId = subjectCache.get(fallbackName);
       if (subjectId === undefined) {
-        const created = await prisma.subject.create({ data: { name: fallbackName } });
-        subjectId = created.id;
+        const upserted = await prisma.subject.upsert({ where: { name: fallbackName }, create: { name: fallbackName }, update: {} });
+        subjectId = upserted.id;
         subjectCache.set(fallbackName, subjectId);
       }
-      resolvedItems.push({ subjectName: fallbackName, subjectId, hoursToCover: null, itemType: "materia" });
+      resolvedItems.push({ subjectName: fallbackName, subjectId, hoursToCover: null, itemType: "materia", grade: null, llamado: null, caracter: null });
     }
 
     // Crear UN concurso + N ContestItems en transacción
     const primaryItem = resolvedItems[0];
+
+    // Detectar si es ampliatoria de un concurso previo de la misma escuela (últimos 30 días)
+    const isAmpliatoria = /ampliatoria|rectificaci[oó]n|modificaci[oó]n|correccion/i.test(titleText);
+    let parentContestId: number | null = null;
+    if (isAmpliatoria) {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
+      const parent = await prisma.contest.findFirst({
+        where: {
+          school_id: school.id,
+          created_at: { gte: thirtyDaysAgo },
+          subject_id: primaryItem.subjectId,
+          parent_contest_id: null,
+          title: { not: { contains: "ampliatoria" } },
+        },
+        orderBy: { created_at: "desc" },
+      });
+      if (parent) {
+        parentContestId = parent.id;
+        cgeScraperLogger.info("CGE API scraper → ampliatoria vinculada a concurso padre", {
+          childUrl: normalizedUrl,
+          parentId: parent.id,
+          parentTitle: parent.title,
+        });
+      }
+    }
     await prisma.$transaction(async (tx) => {
       const contest = await tx.contest.create({
         data: {
@@ -450,6 +668,7 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<{ created:
           source_name: SOURCE_NAME,
           is_active: true,
           is_processed: true,
+          parent_contest_id: parentContestId,
         },
       });
       await tx.contestItem.createMany({
@@ -457,6 +676,9 @@ export async function runCgeApiScraper(prisma: PrismaClient): Promise<{ created:
           contest_id: contest.id,
           subject_id: ri.subjectId,
           hours_to_cover: ri.hoursToCover,
+          grade: ri.grade,
+          llamado: ri.llamado,
+          caracter: ri.caracter,
           item_type: ri.itemType,
         })),
       });

@@ -116,4 +116,18 @@ export const schedulerRoutes: FastifyPluginAsync = async (app) => {
     const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit ?? "20", 10) || 20));
     return { runs: await schedulerService.getHistory(limit) };
   });
+
+  // Desglose por motivo de descarte de una corrida puntual (para el modal
+  // "detalle de filtros" del historial de ejecuciones).
+  app.get<{ Params: { id: string } }>("/history/:id/discarded", async (req, reply) => {
+    const runId = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(runId)) {
+      return reply.status(400).send({ detail: "id inválido" });
+    }
+    const breakdown = await schedulerService.getRunDiscardedBreakdown(runId);
+    if (!breakdown) {
+      return reply.status(404).send({ detail: "Corrida no encontrada" });
+    }
+    return breakdown;
+  });
 };

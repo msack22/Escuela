@@ -11,6 +11,8 @@ import {
   Progress,
   Empty,
   Select,
+  Modal,
+  List,
 } from 'antd';
 import {
   PlayCircleOutlined,
@@ -20,6 +22,7 @@ import {
   CloseCircleOutlined,
   ClockCircleOutlined,
   SettingOutlined,
+  RightOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -33,10 +36,22 @@ import {
   getSchedulerConfig,
   updateSchedulerConfig,
   getSchedulerHistory,
+  getSchedulerRunDiscarded,
   SchedulerHistoryRun,
 } from '../../services/api';
 
 const { Title, Text } = Typography;
+
+function discardReasonLabel(reason: string): string {
+  switch (reason) {
+    case 'level_keyword':
+      return 'Descartado por palabra clave de nivel (posible falso positivo)';
+    case 'duplicate_url':
+      return 'Ya existía (duplicado por URL)';
+    default:
+      return reason;
+  }
+}
 
 const ScrapingControl: React.FC = () => {
   const queryClient = useQueryClient();
@@ -73,6 +88,13 @@ const ScrapingControl: React.FC = () => {
     queryKey: ['schedulerHistory-unified'],
     queryFn: () => getSchedulerHistory(30),
     refetchInterval: 60000,
+  });
+
+  const [discardedRunId, setDiscardedRunId] = React.useState<number | null>(null);
+  const { data: discardedBreakdown, isLoading: discardedLoading } = useQuery({
+    queryKey: ['schedulerRunDiscarded', discardedRunId],
+    queryFn: () => getSchedulerRunDiscarded(discardedRunId as number),
+    enabled: discardedRunId != null,
   });
 
   const [selectedSources, setSelectedSources] = React.useState<string[]>([]);
@@ -234,11 +256,52 @@ const ScrapingControl: React.FC = () => {
         )),
     },
     {
-      title: 'Concursos totales',
+      title: 'Traídos (API)',
+      dataIndex: 'fetched_total',
+      key: 'fetched_total',
+      width: 110,
+      align: 'center' as const,
+      render: (v: number) => (
+        <span style={{ color: '#1677ff' }} title="Total que devolvió la API (sin filtrar)">
+          {v ?? 0}
+        </span>
+      ),
+    },
+    {
+      title: 'Guardados',
       dataIndex: 'total_contests',
       key: 'total_contests',
-      width: 130,
+      width: 100,
       align: 'center' as const,
+      render: (v: number) => (
+        <span style={{ color: v > 0 ? '#52c41a' : '#888' }}>
+          {v > 0 ? `+${v}` : '0'}
+        </span>
+      ),
+    },
+    {
+      title: 'Filtrados',
+      key: 'filtrados',
+      width: 100,
+      align: 'center' as const,
+      render: (_: unknown, row: SchedulerHistoryRun) => {
+        const filtered = (row.fetched_total ?? 0) - (row.total_contests ?? 0);
+        return (
+          <span
+            style={{ color: filtered > 0 ? '#faad14' : '#888' }}
+            title="Solo cuenta duplicados por URL. Los descartes por palabra clave de nivel no entran acá — tocá la fila para ver el detalle completo."
+          >
+            {filtered > 0 ? filtered : '0'}
+          </span>
+        );
+      },
+    },
+    {
+      title: '',
+      key: 'detalle',
+      width: 40,
+      align: 'center' as const,
+      render: () => <RightOutlined style={{ color: '#999' }} />,
     },
   ];
 
@@ -446,12 +509,16 @@ const ScrapingControl: React.FC = () => {
             />
 
             <Table
-              rowKey={(row: SchedulerHistoryRun) => row.started_at}
+              rowKey={(row: SchedulerHistoryRun) => row.id}
               loading={false}
               columns={schedulerColumns}
               dataSource={schedulerHistory?.runs ?? []}
               pagination={{ pageSize: 5, showSizeChanger: false }}
               size="small"
+              onRow={(row: SchedulerHistoryRun) => ({
+                onClick: () => setDiscardedRunId(row.id),
+                style: { cursor: 'pointer' },
+              })}
               locale={{
                 emptyText: (
                   <Empty
@@ -462,6 +529,51 @@ const ScrapingControl: React.FC = () => {
               }}
             />
           </Space>
+
+          <Modal
+            title="Detalle de filtros de la corrida"
+            open={discardedRunId != null}
+            onCancel={() => setDiscardedRunId(null)}
+            footer={[
+              <Button key="close" onClick={() => setDiscardedRunId(null)}>
+                Cerrar
+              </Button>,
+            ]}
+            width={720}
+          >
+            {discardedLoading && <Spin />}
+            {discardedBreakdown && (
+              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                <Alert
+                  type="info"
+                  showIcon
+                  message="Categorías excluidas por diseño (nunca se piden a la API)"
+                  description={discardedBreakdown.excluded_levels.join(', ') || 'Ninguna'}
+                />
+                {discardedBreakdown.groups.length === 0 && (
+                  <Empty description="No se descartó ningún concurso individual en esta corrida." />
+                )}
+                {discardedBreakdown.groups.map((g) => (
+                  <Card key={g.reason} size="small" title={`${discardReasonLabel(g.reason)} (${g.count})`}>
+                    <List
+                      size="small"
+                      dataSource={g.items}
+                      renderItem={(item) => (
+                        <List.Item>
+                          <Space direction="vertical" size={0} style={{ width: '100%' }}>
+                            <a href={item.url} target="_blank" rel="noopener noreferrer">
+                              {item.title || item.url}
+                            </a>
+                            {item.keyword_matched && <Tag color="orange">keyword: {item.keyword_matched}</Tag>}
+                          </Space>
+                        </List.Item>
+                      )}
+                    />
+                  </Card>
+                ))}
+              </Space>
+            )}
+          </Modal>
         </Card>
       </Space>
     </div>

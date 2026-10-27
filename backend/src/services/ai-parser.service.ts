@@ -17,6 +17,8 @@ export type AIContestFields = {
   dateNotes?: string;
   schedule?: string;
   schoolName?: string;
+  city?: string;
+  department?: string;
 };
 
 const EXTRACT_TOOL: Anthropic.Tool = {
@@ -102,6 +104,20 @@ const EXTRACT_TOOL: Anthropic.Tool = {
           "Nombre real de la escuela, instituto o establecimiento educativo donde se realiza el concurso, " +
           "tal como aparece en el texto. Ej: 'Escuela Técnica N° 1 de Ceibas', 'Instituto Superior Paraná'. " +
           "No incluir si el texto no menciona un nombre de establecimiento específico.",
+      },
+      city: {
+        type: "string",
+        description:
+          "Ciudad o localidad donde se realiza el concurso, tal como aparece en el texto. " +
+          "Ej: 'Gualeguaychú', 'Villa Paranacito', 'Concepción del Uruguay', 'Colón', 'Paraná'. " +
+          "No incluir si no está mencionada.",
+      },
+      department: {
+        type: "string",
+        description:
+          "Departamento de Entre Ríos donde se realiza el concurso. " +
+          "Ej: 'Gualeguaychú', 'Islas del Ibicuy', 'Uruguay', 'Gualeguay', 'Villaguay', 'Colón', 'Paraná'. " +
+          "Inferir del texto, ciudad o nombre de la DDE/DRE mencionada. No incluir si no se puede determinar.",
       },
     },
     required: [],
@@ -200,8 +216,14 @@ export async function parseContestWithAI(text: string): Promise<AIContestFields>
     if (typeof raw.schoolName === "string" && raw.schoolName.trim().length >= 3) {
       result.schoolName = raw.schoolName.trim().slice(0, 255);
     }
+    if (typeof raw.city === "string" && raw.city.trim().length >= 2) {
+      result.city = raw.city.trim().slice(0, 100);
+    }
+    if (typeof raw.department === "string" && raw.department.trim().length >= 2) {
+      result.department = raw.department.trim().slice(0, 100);
+    }
 
-    appLogger.debug("AI parser: campos extraídos", { itemCount: result.items?.length, schoolName: result.schoolName });
+    appLogger.debug("AI parser: campos extraídos", { itemCount: result.items?.length, schoolName: result.schoolName, city: result.city, department: result.department });
     return result;
   } catch (err) {
     appLogger.warn("AI parser: error llamando Anthropic API", { error: (err as Error)?.message });

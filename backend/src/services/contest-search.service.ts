@@ -50,7 +50,8 @@ export const contestSearchService = {
     const skip = Math.max(0, filters.skip ?? 0);
     const limit = Math.min(1000, Math.max(1, filters.limit ?? 100));
 
-    const where: Record<string, unknown> = { is_active: true };
+    const where: Record<string, unknown> = {};
+    if (filters.isActive !== undefined) where.is_active = filters.isActive;
     if (filters.sourceName) {
       where.source_name = filters.sourceName;
     } else {
@@ -84,7 +85,6 @@ export const contestSearchService = {
     }
     if (filters.minHours != null) where.hours_to_cover = { ...((where.hours_to_cover as object) || {}), gte: filters.minHours };
     if (filters.maxHours != null) where.hours_to_cover = { ...((where.hours_to_cover as object) || {}), lte: filters.maxHours };
-    if (filters.isActive !== undefined) where.is_active = filters.isActive;
     if (filters.departments?.length || filters.cities?.length || filters.department || filters.city || filters.schoolName) {
       where.school = where.school as Record<string, unknown> || {};
       if (filters.departments?.length) {
@@ -116,7 +116,7 @@ export const contestSearchService = {
           { date: "desc" },
           { created_at: "desc" },
         ],
-        include: { school: true, subject: true },
+        include: { school: true, subject: true, items: { include: { subject: true } } },
       }),
       prisma.contest.count({ where }),
     ]);
@@ -148,7 +148,16 @@ export const contestSearchService = {
         subject: c.subject
           ? { id: c.subject.id, name: c.subject.name }
           : null,
+        items: c.items.map((item) => ({
+          subject: item.subject.name,
+          hours: item.hours_to_cover,
+          grade: item.grade,
+          llamado: item.llamado,
+          caracter: item.caracter,
+        })),
         source: { url: c.source_url, name: c.source_name },
+        is_active: c.is_active,
+        parent_contest_id: c.parent_contest_id ?? null,
       })),
       total,
       skip,

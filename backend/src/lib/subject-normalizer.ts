@@ -7,6 +7,7 @@ const CANONICAL_SUBJECTS: string[] = [
   "Lengua y Literatura",
   "Lengua",
   "Literatura Latinoamericana",
+  "Literatura Argentina",
   "Didáctica de la Lengua y Literatura",
   // Matemática
   "Matemática",
@@ -56,6 +57,7 @@ const CANONICAL_SUBJECTS: string[] = [
   "Coordinación de Prácticas Profesionalizantes",
   "Preceptor",
   "Rector",
+  "Bibliotecario",
   // Supervisión
   "Supervisor de Educación",
   "Supervisor de Jóvenes y Adultos",
@@ -144,6 +146,7 @@ export function normalizeSubjectName(raw: string | null | undefined): string | u
 const CARGO_NAMES = new Set([
   "Preceptor",
   "Rector",
+  "Bibliotecario",
   "Secretaría",
   "Dirección",
   "Vicedirección",
@@ -162,3 +165,116 @@ export function getItemType(subjectName: string): "cargo" | "materia" {
 }
 
 export { CANONICAL_SUBJECTS };
+
+/**
+ * Mapa de overrides exactos: nombre específico → nombre del grupo.
+ * Usado para agrupar variantes de la misma materia bajo un nombre canónico.
+ */
+const EXACT_GROUP_OVERRIDES: Record<string, string> = {
+  // ── Lengua y Literatura ──────────────────────────────────────────────────
+  "Lengua": "Lengua y Literatura",
+  "Didáctica de la Lengua y Literatura": "Lengua y Literatura",
+
+  // ── Literatura (variantes específicas) ───────────────────────────────────
+  "Literatura Argentina":        "Literatura",
+  "Literatura Latinoamericana":  "Literatura",
+  "Literatura Universal":        "Literatura",
+  "Literatura Clásica":          "Literatura",
+  "Literatura Contemporánea":    "Literatura",
+  "Literatura Moderna":          "Literatura",
+
+  // ── Tecnología ───────────────────────────────────────────────────────────
+  "Educación Tecnológica":       "Tecnología",
+  "Dibujo Técnico":              "Tecnología",
+  "Electrotecnia I":             "Tecnología",
+  "Máquinas y Herramientas":     "Tecnología",
+  "Instalaciones Electromecánicas": "Tecnología",
+
+  // ── Arte ─────────────────────────────────────────────────────────────────
+  "Educación Artística":         "Arte",
+  "Artes Plásticas":             "Arte",
+  "Cultura y Estética Contemporánea": "Arte",
+
+  // ── Música ───────────────────────────────────────────────────────────────
+  "Instrumento III - Corno":     "Música",
+  "Prácticas Gimnásticas y Expresivas II": "Educación Física",
+
+  // ── Idiomas ──────────────────────────────────────────────────────────────
+  "IDIOMA EXTRANJERO":           "Idiomas",
+
+  // ── Educación Agropecuaria ───────────────────────────────────────────────
+  "Organización y Gestión de Empresas Agropecuarias": "Educación Agropecuaria",
+  "PRODUCCIÓN DE BOVINOS PARA CARNE":                 "Educación Agropecuaria",
+  "Agroecología":                "Educación Agropecuaria",
+  "Educación Rural":             "Educación Agropecuaria",
+
+  // ── Informática / Digital ────────────────────────────────────────────────
+  "Producción Multimedia y Digital": "Informática",
+
+  // ── Supervisión ──────────────────────────────────────────────────────────
+  "Supervisor de Educación":          "Supervisión",
+  "Supervisor Escolar":               "Supervisión",
+  "Supervisor de Jóvenes y Adultos":  "Supervisión",
+
+  // ── Tutoría ──────────────────────────────────────────────────────────────
+  "Tutoría Docente":                             "Tutoría",
+  "Tutorías":                                    "Tutoría",
+  "Tutoría para la inclusión - IDÓNEO":          "Tutoría",
+  "Tutoría para la inclusión – IDÓNEO":          "Tutoría",
+  "Tutoría para la inclusión - IDÉNEO": "Tutoría",
+  "Tutoría para la inclusión – IDÉNEO": "Tutoría",
+  "TUTOR/A DE CIENCIAS SOCIALES":               "Tutoría",
+  "Tutor/a Educativo/a Departamental de Jóvenes y Adultos": "Tutoría",
+
+  // ── Tutoría Domiciliaria ─────────────────────────────────────────────────
+  "Tutor Domiciliario":             "Tutoría Domiciliaria",
+  "Tutor Domiciliario Hospitalario":"Tutoría Domiciliaria",
+  "TUTOR DOMICILIARIO PARA":        "Tutoría Domiciliaria",
+  "Profesor Tutor Domiciliario":    "Tutoría Domiciliaria",
+
+  // ── Docencia primaria ────────────────────────────────────────────────────
+  "Maestra de Ciclo":                                        "Maestra/o de Ciclo",
+  "Maestro de Ciclo":                                        "Maestra/o de Ciclo",
+  "Maestra de Grado Jornada Simple Escuela Primaria NEP N.°": "Maestra/o de Grado",
+  "Maestro de Apoyo Ulramontano":    "Maestro de Apoyo",
+  "Maestro de Apoyo Unidocente (MAU)": "Maestro de Apoyo",
+
+  // ── Acompañamiento ───────────────────────────────────────────────────────
+  "Acompañamiento al estudio de CS SOCIALES":               "Acompañamiento",
+  "Acompañamiento al estudio de CS SOCIALES. (DESCONVOCADO)": "Acompañamiento",
+
+  // ── Administración / Gestión ─────────────────────────────────────────────
+  "Teoría y Gestión de las Organizaciones II": "Administración",
+
+  // ── Comunicación ─────────────────────────────────────────────────────────
+  "Cultura y Comunicación":             "Comunicación",
+  "Teoría de la Comunicación I y II":   "Comunicación",
+
+  // ── Salud / Enfermería ────────────────────────────────────────────────────
+  "Salud":                       "Salud",
+  "Metodología de la Investigación": "Investigación",
+};
+
+/**
+ * Devuelve el nombre de grupo (normalized_name) para una materia.
+ * Primero busca overrides exactos, luego aplica patrones, finalmente devuelve el nombre original.
+ */
+export function getSubjectGroupName(name: string): string {
+  if (!name) return name;
+
+  // 1. Override exacto
+  if (EXACT_GROUP_OVERRIDES[name]) return EXACT_GROUP_OVERRIDES[name];
+
+  // 2. Patrones genéricos (cubre variantes futuras)
+  if (/^Literatura\s+\S/i.test(name))               return "Literatura";
+  if (/^Tutorí?as?\b/i.test(name))                  return "Tutoría";
+  if (/^Tutor\s+Domiciliario/i.test(name))           return "Tutoría Domiciliaria";
+  if (/^Supervisor\s+(?:de|Escolar)/i.test(name))    return "Supervisión";
+  if (/^Maestr[ao]\s+de\s+Ciclo/i.test(name))        return "Maestra/o de Ciclo";
+  if (/^Maestr[ao]\s+de\s+Grado/i.test(name))        return "Maestra/o de Grado";
+  if (/^Maestr[ao]\s+de\s+Apoyo/i.test(name))        return "Maestro de Apoyo";
+  if (/^Acompa[nñ]amiento\b/i.test(name))            return "Acompañamiento";
+
+  // 3. Sin grupo → normalized_name es el mismo que name
+  return name;
+}

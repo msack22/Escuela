@@ -26,6 +26,46 @@ export const contestsRoutes: FastifyPluginAsync = async (app) => {
     return contestSearchService.getStatistics();
   });
 
+  /** Concursos de baja confianza: subject="General" o sin ítems extraídos. */
+  app.get<{ Querystring: { limit?: string } }>("/low-confidence", async (req) => {
+    const limit = Math.min(parseInt(req.query.limit ?? "100", 10) || 100, 300);
+
+    const generalSubject = await req.server.prisma.subject.findFirst({
+      where: { name: { in: ["General", "general", "GENERAL"] } },
+    });
+
+    const contests = await req.server.prisma.contest.findMany({
+      where: {
+        is_active: true,
+        OR: [
+          generalSubject ? { subject_id: generalSubject.id } : { id: -1 },
+          { items: { none: {} } },
+        ],
+      },
+      include: {
+        school: { select: { name: true, city: true, department: true } },
+        subject: { select: { id: true, name: true } },
+        items: { include: { subject: { select: { name: true } } } },
+      },
+      orderBy: { created_at: "desc" },
+      take: limit,
+    });
+
+    return contests.map((c) => ({
+      id: c.id,
+      title: c.title,
+      date: c.date?.toISOString() ?? null,
+      level: c.level,
+      source_url: c.source_url,
+      source_name: c.source_name,
+      created_at: c.created_at?.toISOString() ?? null,
+      school: c.school,
+      subject: c.subject,
+      items_count: c.items.length,
+      reason: c.items.length === 0 ? "sin_items" : "subject_general",
+    }));
+  });
+
   app.get("/filters/subjects", async () => contestSearchService.getAllSubjects());
   app.get("/filters/cities", async () => ({ cities: await contestSearchService.getAllCities() }));
   app.get("/filters/levels", async () => ({ levels: LEVELS }));

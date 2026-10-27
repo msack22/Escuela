@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Table,
   Typography,
@@ -14,6 +14,8 @@ import {
   Spin,
   Select,
   DatePicker,
+  Switch,
+  Tooltip,
 } from 'antd';
 import { PlusOutlined, BellOutlined, HistoryOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -43,6 +45,8 @@ const AlertManagement: React.FC = () => {
   const [historyAlertName, setHistoryAlertName] = useState('');
   const [form] = Form.useForm();
   const [testForm] = Form.useForm();
+  const watchedPrefs     = Form.useWatch('subject_preferences', form) as string[] | undefined;
+  const watchedExcluded  = Form.useWatch('excluded_subjects',   form) as string[] | undefined;
   const queryClient = useQueryClient();
 
   const { data: alerts = [], isLoading, error } = useQuery({
@@ -54,6 +58,38 @@ const AlertManagement: React.FC = () => {
     queryKey: ['subjects'],
     queryFn: fetchSubjects,
   });
+
+  // Agrupa materias por normalized_name para el selector de alertas.
+  // Ejemplo: "Literatura Argentina" y "Literatura Latinoamericana" aparecen
+  // bajo "Literatura". Value = normalized_name → el backend matchea por grupo.
+  const subjectOptions = useMemo(() => {
+    if (!subjects?.length) return [];
+    const groupMap = new Map<string, string[]>();
+    for (const s of subjects as any[]) {
+      const group: string = s.normalized_name || s.name;
+      if (!groupMap.has(group)) groupMap.set(group, []);
+      if (s.name !== group) groupMap.get(group)!.push(s.name as string);
+    }
+    return Array.from(groupMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b, 'es'))
+      .map(([group, specifics]) => ({
+        label: specifics.length > 0
+          ? `${group}  (+  ${specifics.join(', ')})`
+          : group,
+        value: group,
+      }));
+  }, [subjects]);
+
+  // Opciones filtradas: excluye lo que ya está elegido en el otro combo
+  const prefsOptions    = useMemo(() => {
+    const excluded = new Set(watchedExcluded ?? []);
+    return subjectOptions.filter(o => !excluded.has(o.value));
+  }, [subjectOptions, watchedExcluded]);
+
+  const excludedOptions = useMemo(() => {
+    const wanted = new Set(watchedPrefs ?? []);
+    return subjectOptions.filter(o => !wanted.has(o.value));
+  }, [subjectOptions, watchedPrefs]);
 
   const { data: users = [] } = useQuery({
     queryKey: ['users'],
@@ -108,6 +144,7 @@ const AlertManagement: React.FC = () => {
       subject_preferences: [],
       excluded_subjects: [],
       departments: [],
+      digest_mode: false,
     });
     setModalOpen(true);
   };
@@ -133,6 +170,7 @@ const AlertManagement: React.FC = () => {
       subject_preferences: record.subject_preferences ?? [],
       excluded_subjects: record.excluded_subjects ?? [],
       departments: record.departments ?? [],
+      digest_mode: record.digest_mode ?? false,
     });
     setModalOpen(true);
   };
@@ -147,6 +185,7 @@ const AlertManagement: React.FC = () => {
             subject_preferences: values.subject_preferences,
             excluded_subjects: values.excluded_subjects ?? [],
             departments: values.departments,
+            digest_mode: values.digest_mode ?? false,
           },
         });
       } else {
@@ -156,6 +195,7 @@ const AlertManagement: React.FC = () => {
           subject_preferences: values.subject_preferences ?? [],
           excluded_subjects: values.excluded_subjects ?? [],
           departments: values.departments ?? [],
+          digest_mode: values.digest_mode ?? false,
         });
       }
     });
@@ -223,6 +263,15 @@ const AlertManagement: React.FC = () => {
       key: 'departments',
       render: (arr: string[]) =>
         Array.isArray(arr) ? arr.map((d) => <Tag key={d}>{d}</Tag>) : '-',
+    },
+    {
+      title: 'Notif.',
+      dataIndex: 'digest_mode',
+      key: 'digest_mode',
+      width: 90,
+      render: (v: boolean) => (
+        <Tag color={v ? 'orange' : 'blue'}>{v ? 'Resumen' : 'Inmediato'}</Tag>
+      ),
     },
     {
       title: 'Acciones',
@@ -320,24 +369,36 @@ const AlertManagement: React.FC = () => {
           <Form.Item name="user_name" label="Nombre" rules={[{ required: true }]}>
             <Input placeholder="Nombre del usuario (se rellena al elegir usuario)" />
           </Form.Item>
-          <Form.Item name="subject_preferences" label="Materias de interés (quiero recibir)">
+          <Form.Item
+            name="subject_preferences"
+            label="Materias de interés (quiero recibir)"
+            extra="Las variantes específicas se muestran entre paréntesis. Las ya excluidas no aparecen aquí."
+          >
             <Select
               mode="multiple"
               placeholder="Todas si no elegís ninguna"
               allowClear
-              options={subjects?.map((s: any) => ({ label: s.name, value: s.name })) ?? []}
+              showSearch
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              options={prefsOptions}
             />
           </Form.Item>
           <Form.Item
             name="excluded_subjects"
             label="Materias excluidas (no quiero recibir)"
-            extra="Si un concurso tiene otras materias además de las excluidas, te llega igual sin ellas."
+            extra="Si un concurso tiene otras materias además de las excluidas, te llega igual sin ellas. Las ya elegidas como interés no aparecen aquí."
           >
             <Select
               mode="multiple"
               placeholder="Ninguna excluida"
               allowClear
-              options={subjects?.map((s: any) => ({ label: s.name, value: s.name })) ?? []}
+              showSearch
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              options={excludedOptions}
             />
           </Form.Item>
           <Form.Item name="departments" label="Departamentos preferidos">
@@ -350,6 +411,11 @@ const AlertManagement: React.FC = () => {
                 value: d,
               }))}
             />
+          </Form.Item>
+          <Form.Item name="digest_mode" label="Modo resumen diario" valuePropName="checked">
+            <Tooltip title="Activá para recibir un único resumen por día (7 hs) en lugar de notificaciones inmediatas">
+              <Switch checkedChildren="Resumen diario" unCheckedChildren="Inmediato" />
+            </Tooltip>
           </Form.Item>
         </Form>
       </Modal>

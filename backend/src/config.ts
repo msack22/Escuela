@@ -23,6 +23,12 @@ const envSchema = z.object({
   /** Si true, intentar primero axios (rápido) y solo usar navegador si falla o contenido vacío */
   SCRAPING_PREFER_HTTP: z.coerce.boolean().default(true),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  ADMIN_EMAIL: z.string().optional().default("").transform((s) => (s || "").trim()),
+  ADMIN_WHATSAPP: z.string().optional().default("").transform((s) => (s || "").trim()),
+  /** Por dónde mandar los WhatsApp: "local" = whatsapp-web.js (número personal, servicio compartido);
+   *  "meta" = WhatsApp Business Cloud API (requiere WHATSAPP_BUSINESS_TOKEN/WHATSAPP_PHONE_NUMBER_ID
+   *  y que el destinatario esté en la lista de números permitidos de Meta). */
+  WHATSAPP_PROVIDER: z.enum(["local", "meta"]).default("local"),
 });
 
 const parsed = envSchema.safeParse(process.env);

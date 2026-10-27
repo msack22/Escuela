@@ -11,6 +11,7 @@ import {
   Select,
   Modal,
   Tag,
+  Switch,
 } from 'antd';
 import {
   SearchOutlined,
@@ -31,12 +32,21 @@ import {
 const { Title, Text } = Typography;
 const { Option } = Select;
 
+interface ContestItem {
+  subject: string;
+  hours?: number | null;
+  grade?: string | null;
+  llamado?: string | null;
+  caracter?: string | null;
+}
+
 interface Contest {
   id: number;
   title?: string;
   description?: string;
   school?: { name?: string; city?: string; department?: string; address?: string };
   subject?: { name?: string };
+  items?: ContestItem[];
   source?: { url?: string; name?: string };
   date?: string;
   publication_date?: string;
@@ -47,6 +57,7 @@ interface Contest {
   hours_to_cover?: number;
   contract_type?: string;
   is_active?: boolean;
+  parent_contest_id?: number | null;
 }
 
 // Colores consistentes por categoría para ayudar a agrupar visualmente
@@ -70,6 +81,7 @@ const getColorForCategory = (category: keyof typeof CATEGORY_COLORS, value?: str
 
 const ContestList: React.FC = () => {
   const queryClient = useQueryClient();
+  const [showOnlyActive, setShowOnlyActive] = useState(false);
   const [filters, setFilters] = useState({
     title_contains: '',
     subject_contains: '',
@@ -80,8 +92,8 @@ const ContestList: React.FC = () => {
   const [infoModalContest, setInfoModalContest] = useState<Contest | null>(null);
 
   const { data: contestsData, isLoading } = useQuery({
-    queryKey: ['contests', filters],
-    queryFn: () => fetchContests(filters),
+    queryKey: ['contests', filters, showOnlyActive],
+    queryFn: () => fetchContests({ ...filters, ...(showOnlyActive ? { is_active: true } : {}) }),
   });
 
   const { data: citiesData } = useQuery({
@@ -126,7 +138,32 @@ const ContestList: React.FC = () => {
   };
 
   const columns = [
-    { title: 'Título', dataIndex: 'title', key: 'title', ellipsis: true },
+    {
+      title: 'Título',
+      dataIndex: 'title',
+      key: 'title',
+      ellipsis: true,
+      render: (title: string, row: Contest) => (
+        <Space size={4}>
+          {row.parent_contest_id != null && (
+            <Tag color="purple" style={{ borderRadius: 999, fontSize: 11 }}>Ampliatoria</Tag>
+          )}
+          <span>{title}</span>
+        </Space>
+      ),
+    },
+    {
+      title: 'Estado',
+      key: 'is_active',
+      dataIndex: 'is_active',
+      width: 100,
+      render: (v: boolean) =>
+        v ? (
+          <Tag color="green" style={{ borderRadius: 999 }}>Próximo</Tag>
+        ) : (
+          <Tag color="default" style={{ borderRadius: 999 }}>Pasado</Tag>
+        ),
+    },
     {
       title: 'Ciudad',
       key: 'city',
@@ -156,18 +193,24 @@ const ContestList: React.FC = () => {
         ),
     },
     {
-      title: 'Materia',
+      title: 'Materia(s)',
       key: 'subject',
-      dataIndex: ['subject', 'name'],
-      width: 140,
-      render: (v: string | undefined) =>
-        v ? (
-          <Tag color={getColorForCategory('subject', v)} style={{ borderRadius: 999 }}>
-            {v}
-          </Tag>
-        ) : (
-          '—'
-        ),
+      width: 180,
+      render: (_: unknown, record: Contest) => {
+        const subjects = record.items && record.items.length > 0
+          ? [...new Set(record.items.map(i => i.subject))]
+          : record.subject?.name ? [record.subject.name] : [];
+        if (subjects.length === 0) return '—';
+        return (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+            {subjects.map((s) => (
+              <Tag key={s} color={getColorForCategory('subject', s)} style={{ borderRadius: 999, margin: 0 }}>
+                {s}
+              </Tag>
+            ))}
+          </div>
+        );
+      },
     },
     {
       title: 'Fecha publicación',
@@ -184,27 +227,23 @@ const ContestList: React.FC = () => {
       render: (v: string) => (v ? new Date(v).toLocaleDateString('es-AR') : '—'),
     },
     {
-      title: 'Fuente',
-      key: 'source',
-      width: 180,
-      ellipsis: true,
-      render: (_: unknown, r: Contest) =>
-        r.source?.name ? (
-          <Tag
-            color={getColorForCategory('source', r.source?.name)}
-            style={{ borderRadius: 999, maxWidth: 160 }}
-            title={r.source?.name}
-          >
-            <span
-              style={{ maxWidth: 140, display: 'inline-block' }}
-              className="text-ellipsis overflow-hidden whitespace-nowrap"
-            >
-              {r.source?.name}
-            </span>
-          </Tag>
-        ) : (
-          '—'
-        ),
+      title: 'Nivel',
+      key: 'level',
+      dataIndex: 'level',
+      width: 110,
+      render: (v: string) => {
+        if (!v) return '—';
+        const lv = v.toLowerCase();
+        const color =
+          lv.startsWith('secundar') ? 'blue' :
+          lv.startsWith('primar')   ? 'green' :
+          lv.startsWith('superior') ? 'purple' :
+          lv.startsWith('inicial')  ? 'orange' :
+          lv.startsWith('supervis') ? 'cyan' :
+          'default';
+        const label = v.charAt(0).toUpperCase() + v.slice(1).toLowerCase();
+        return <Tag color={color} style={{ borderRadius: 999 }}>{label}</Tag>;
+      },
     },
     {
       title: 'Link',
@@ -364,6 +403,12 @@ const ContestList: React.FC = () => {
           <Button icon={<ClearOutlined />} onClick={handleClear}>
             Limpiar
           </Button>
+          <Switch
+            checked={showOnlyActive}
+            onChange={setShowOnlyActive}
+            checkedChildren="Solo próximos"
+            unCheckedChildren="Todos"
+          />
         </Space>
       </Form>
 
@@ -417,7 +462,28 @@ const ContestList: React.FC = () => {
                 </div>
               </div>
             )}
-            {infoModalContest.subject?.name && (
+            {(infoModalContest.items && infoModalContest.items.length > 0) ? (
+              <div>
+                <Text strong>Materias / Cargos</Text>
+                <div style={{ marginTop: 4 }}>
+                  {infoModalContest.items.map((item, idx) => (
+                    <div key={idx} style={{ marginBottom: 6, paddingLeft: 8, borderLeft: '2px solid #374151' }}>
+                      <span style={{ fontWeight: 500 }}>{item.subject}</span>
+                      {item.hours != null && <span style={{ color: '#9ca3af', marginLeft: 6 }}>{item.hours}hs</span>}
+                      {item.grade && <span style={{ color: '#9ca3af', marginLeft: 6 }}>· {item.grade}</span>}
+                      {item.llamado && <span style={{ color: '#9ca3af', marginLeft: 6 }}>· {item.llamado}</span>}
+                      {item.caracter && (
+                        <span style={{ marginLeft: 6 }}>
+                          <Tag color={item.caracter.toUpperCase().startsWith('TITULAR') ? 'green' : item.caracter.toUpperCase().startsWith('INTERINO') ? 'blue' : 'orange'} style={{ fontSize: 11 }}>
+                            {item.caracter}
+                          </Tag>
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : infoModalContest.subject?.name && (
               <div>
                 <Text strong>Materia</Text>
                 <div>{infoModalContest.subject.name}</div>

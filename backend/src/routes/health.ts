@@ -32,4 +32,14 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
       return { status: "error", database: "disconnected" };
     }
   });
+
+  app.get("/whatsapp-status", async () => {
+    try {
+      const res = await fetch("http://localhost:3099/status", { signal: AbortSignal.timeout(3000) });
+      const data = await res.json() as { ready?: boolean; initializing?: boolean };
+      return { ready: data.ready === true, initializing: data.initializing === true };
+    } catch {
+      return { ready: false, initializing: false, error: "unavailable" };
+    }
+  });
 };

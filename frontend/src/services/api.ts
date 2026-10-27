@@ -283,8 +283,8 @@ export const fetchAlertHistory = async (alertId: number, limit = 100) => {
       shift: string | null;
       source_url: string | null;
       school: { name: string; city: string; department: string } | null;
-      subject: { name: string } | null;
-      items: Array<{ item_type: string; hours_to_cover: number | null; subject: { name: string } | null }>;
+      subject: { name: string; normalized_name?: string | null } | null;
+      items: Array<{ item_type: string; hours_to_cover: number | null; subject: { name: string; normalized_name?: string | null } | null }>;
     } | null;
   }>;
 };
@@ -414,12 +414,14 @@ export const updateSchedulerConfig = async (data: {
 };
 
 export interface SchedulerHistoryRun {
+  id: number;
   started_at: string;
   finished_at: string;
   timezone: string;
   hour_ar: number;
   sources: string[];
   total_contests: number;
+  fetched_total: number;
   cgeCount: number;
   facebookCount: number;
 }
@@ -427,6 +429,42 @@ export interface SchedulerHistoryRun {
 export const getSchedulerHistory = async (limit: number = 20) => {
   const response = await api.get<{ runs: SchedulerHistoryRun[] }>(
     `/api/scheduler/history?limit=${limit}`,
+  );
+  return response.data;
+};
+
+export interface DiscardedPostItem {
+  id: number;
+  title: string;
+  url: string;
+  keyword_matched: string | null;
+  post_date: string | null;
+  discarded_at: string;
+}
+
+export interface DiscardedGroup {
+  reason: string;
+  count: number;
+  items: DiscardedPostItem[];
+}
+
+export interface SchedulerRunDiscardedBreakdown {
+  run: {
+    id: number;
+    started_at: string;
+    finished_at: string;
+    hour_ar: number;
+    sources: string[];
+    fetched_total: number;
+    total_contests: number;
+  };
+  excluded_levels: string[];
+  groups: DiscardedGroup[];
+}
+
+export const getSchedulerRunDiscarded = async (runId: number) => {
+  const response = await api.get<SchedulerRunDiscardedBreakdown>(
+    `/api/scheduler/history/${runId}/discarded`,
   );
   return response.data;
 };
@@ -468,6 +506,15 @@ export const fetchSystemStatus = async () => {
     return { ...DEFAULT_SYSTEM_STATUS, ...response.data };
   } catch {
     return { ...DEFAULT_SYSTEM_STATUS, api_status: 'unreachable' };
+  }
+};
+
+export const fetchWhatsappStatus = async (): Promise<{ ready: boolean; initializing: boolean } | null> => {
+  try {
+    const response = await api.get('/api/whatsapp-status', { timeout: 4000 });
+    return response.data as { ready: boolean; initializing: boolean };
+  } catch {
+    return null;
   }
 };
 

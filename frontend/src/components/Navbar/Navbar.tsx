@@ -6,9 +6,11 @@ import {
   NotificationOutlined,
   SettingOutlined,
   TeamOutlined,
-  ScheduleOutlined,
   ReadOutlined,
   LoadingOutlined,
+  BankOutlined,
+  BookOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { API_BASE_URL } from '../../services/api';
@@ -53,9 +55,11 @@ const Navbar: React.FC = () => {
   const menuItems = [
     { label: 'Dashboard', icon: <DashboardOutlined />, path: '/' },
     { label: 'Concursos', icon: <OrderedListOutlined />, path: '/contests' },
-    // { label: 'Capacitaciones', icon: <ReadOutlined />, path: '/capacitaciones' },
     { label: 'Alertas', icon: <NotificationOutlined />, path: '/alerts' },
     { label: 'Usuarios', icon: <TeamOutlined />, path: '/users' },
+    { label: 'Materias', icon: <BookOutlined />, path: '/subjects' },
+    { label: 'Sin Materia', icon: <WarningOutlined />, path: '/low-confidence' },
+    { label: 'Escuelas', icon: <BankOutlined />, path: '/padron' },
     { label: 'Scraping', icon: <SettingOutlined />, path: '/scraping' },
   ];
 

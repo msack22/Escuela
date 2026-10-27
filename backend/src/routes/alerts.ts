@@ -30,7 +30,7 @@ export const alertsRoutes: FastifyPluginAsync = async (app) => {
       max_distance_km?: number;
       notification_channels?: string;
     };
-  }>("/", async (req, reply) => {
+  }>("/", { config: { rateLimit: { max: 3, timeWindow: '10 minutes' } } }, async (req, reply) => {
     const body = req.body;
     let userName = body.user_name ?? "Sin nombre";
     let emailAddress = body.email_address ?? null;
@@ -111,6 +111,7 @@ export const alertsRoutes: FastifyPluginAsync = async (app) => {
       max_distance_km?: number | null;
       notification_channels?: string | null;
       is_active?: boolean | null;
+      digest_mode?: boolean | null;
     };
   }>("/:id", async (req, reply) => {
     const id = parseInt(req.params.id, 10);
@@ -147,6 +148,7 @@ export const alertsRoutes: FastifyPluginAsync = async (app) => {
     if ("notification_channels" in body && body.notification_channels != null)
       data.notification_channels = body.notification_channels;
     if ("is_active" in body && body.is_active != null) data.is_active = body.is_active;
+    if ("digest_mode" in body && body.digest_mode != null) data.digest_mode = body.digest_mode;
 
     const alert = await req.server.prisma.alert.update({
       where: { id },
